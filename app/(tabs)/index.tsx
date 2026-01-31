@@ -19,6 +19,15 @@ import {
   Vibration,
   View,
 } from "react-native";
+import FeedScreen from "../../components/social/Feed";
+import HomeScreen from "../../components/social/Home";
+import LoginScreen from "../../components/social/Login";
+import MessagesScreen from "../../components/social/Messages";
+import NotificationsScreen from "../../components/social/Notifications";
+import ProfileScreen from "../../components/social/Profile";
+import AchievementsScreen from "../../components/social/Achievements";
+import { CHARACTER_CHOICES, resolveAvatarSource } from "../../components/social/avatar-source";
+import type { SocialPost, SocialRecentItem, SocialSoftButtonProps } from "../../components/social/types";
 
 const AnimatedImageBackground = Animated.createAnimatedComponent(ImageBackground);
 
@@ -193,7 +202,23 @@ const CLOUDS = [
 ];
 
 // ========= TYPES =========
-type Screen = "LOADING" | "LOGIN" | "MENU" | "SELECT" | "PLAY" | "SCORES" | "STATS" | "WORKSHOP" | "INTEL";
+type Screen =
+  | "LOADING"
+  | "LOGIN"
+  | "MENU"
+  | "SELECT"
+  | "PLAY"
+  | "SCORES"
+  | "STATS"
+  | "WORKSHOP"
+  | "INTEL"
+  | "ACCOUNT"
+  | "SEEDS"
+  | "SOCIAL"
+  | "NOTIFS"
+  | "PROFILE"
+  | "ACHIEVEMENTS"
+  | "MESSAGES";
 type GameMode = "STORY" | "CUSTOM" | "ENDLESS" | "CHALLENGE" | "STEALTH" | "RUSH";
 type Gadget = "sealTape" | "flashCharge" | "batterySwap" | "signalJammer" | null;
 type DifficultyPreset = "EASY" | "NORMAL" | "HARD" | "NIGHTMARE";
@@ -561,6 +586,7 @@ type AchievementDef = {
   id: string;
   name: string;
   desc: string;
+  tier: "common" | "rare" | "epic" | "legendary" | "mythic";
 };
 
 const BEST_KEY = "FIVE_DAYS_BEST_SCORE_V2";
@@ -575,6 +601,9 @@ const ADAPT_KEY = "FIVE_DAYS_ADAPT_V1";
 const GHOST_KEY = "FIVE_DAYS_GHOST_V1";
 const SKILL_KEY = "FIVE_DAYS_SKILL_V1";
 const CONTRACT_KEY = "FIVE_DAYS_CONTRACT_V1";
+const AUTH_KEY = "FIVE_DAYS_AUTH_V1";
+const RECENTS_KEY = "FIVE_DAYS_SOCIAL_RECENTS_V1";
+const API_BASE = process.env.EXPO_PUBLIC_API_BASE || "";
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 let randGlobal = () => Math.random();
 const pick = <T,>(arr: T[]) => arr[Math.floor(randGlobal() * arr.length)];
@@ -685,12 +714,40 @@ const STORY_EVENTS: Record<number, { t: number; line: string }[]> = {
 };
 
 const ACHIEVEMENTS: AchievementDef[] = [
-  { id: "firstNight", name: "First Night", desc: "Supraviețuiește până la 1 AM." },
-  { id: "firstTask", name: "Task Runner", desc: "Completează primul task." },
-  { id: "surge", name: "Power Surge", desc: "Supraviețuiește unui power surge." },
-  { id: "blackout", name: "In the Dark", desc: "Treci printr-un blackout." },
-  { id: "night6", name: "Night 6", desc: "Termină Night 6." },
-  { id: "hardcore", name: "Hardcore", desc: "Câștigă în Hardcore." },
+  { id: "firstNight", name: "First Night", desc: "Supravietuieste pana la 1 AM.", tier: "common" },
+  { id: "firstTask", name: "Task Runner", desc: "Completeaza primul task.", tier: "common" },
+  { id: "watchful", name: "Watchful", desc: "Verifica camerele de 10 ori intr-o noapte.", tier: "common" },
+  { id: "quickSeal", name: "Quick Seal", desc: "Foloseste un SEAL la timp.", tier: "common" },
+  { id: "calmMind", name: "Calm Mind", desc: "Termina o noapte cu sanity peste 60%.", tier: "common" },
+  { id: "noPanic", name: "No Panic", desc: "Nu declansa ALARM intr-o noapte.", tier: "common" },
+
+  { id: "night2", name: "Night Two", desc: "Supravietuieste Night 2.", tier: "rare" },
+  { id: "powerSurge", name: "Power Surge", desc: "Supravietuieste unui power surge.", tier: "rare" },
+  { id: "blackout", name: "In the Dark", desc: "Treci printr-un blackout.", tier: "rare" },
+  { id: "ventMaster", name: "Vent Master", desc: "Blocheaza venturile de 5 ori.", tier: "rare" },
+  { id: "doorTech", name: "Door Technician", desc: "Foloseste usa stanga/dreapta perfect.", tier: "rare" },
+  { id: "firstDeal", name: "Risk Taker", desc: "Accepta un deal si supravietuieste.", tier: "rare" },
+
+  { id: "night3", name: "Night Three", desc: "Supravietuieste Night 3.", tier: "epic" },
+  { id: "taskMaster", name: "Task Master", desc: "Completeaza 3 task-uri intr-o noapte.", tier: "epic" },
+  { id: "stealthRun", name: "Stealth Run", desc: "Termina o noapte fara camere.", tier: "epic" },
+  { id: "zeroJams", name: "Clean Signal", desc: "Nu ai niciun camera jam intr-o noapte.", tier: "epic" },
+  { id: "ghostHunter", name: "Ghost Hunter", desc: "Revealeaza 10 phantom/shadow.", tier: "epic" },
+  { id: "powerManager", name: "Power Manager", desc: "Termina cu power peste 50%.", tier: "epic" },
+
+  { id: "night5", name: "Night Five", desc: "Supravietuieste Night 5.", tier: "legendary" },
+  { id: "noDoorsWin", name: "Silent Night", desc: "Castiga fara a folosi usile.", tier: "legendary" },
+  { id: "perfectPower", name: "Perfect Power", desc: "Termina cu power peste 80%.", tier: "legendary" },
+  { id: "bossSurvivor", name: "Boss Survivor", desc: "Invinge noaptea cu boss.", tier: "legendary" },
+  { id: "speedRunner", name: "Speed Runner", desc: "Termina o noapte in sub 2:30.", tier: "legendary" },
+  { id: "ironWill", name: "Iron Will", desc: "Termina o noapte cu sanity sub 20%.", tier: "legendary" },
+
+  { id: "night6", name: "Night 6", desc: "Termina Night 6.", tier: "mythic" },
+  { id: "hardcore", name: "Hardcore", desc: "Castiga in Hardcore.", tier: "mythic" },
+  { id: "noCamsWin", name: "Blind Run", desc: "Termina fara camere sau flash.", tier: "mythic" },
+  { id: "ultimateHunter", name: "Ultimate Hunter", desc: "Supravietuieste cu toti pe L20.", tier: "mythic" },
+  { id: "shadowBreaker", name: "Shadow Breaker", desc: "Revealeaza 5 shadow in aceeasi noapte.", tier: "mythic" },
+  { id: "mythicEndless", name: "Endless Legend", desc: "Ajungi la H+10 in Endless.", tier: "mythic" },
 ];
 
 const ABILITY_DESC: Record<Ability, string> = {
@@ -748,6 +805,61 @@ export default function App() {
   const [profileName, setProfileName] = useState("");
   const [profileLoaded, setProfileLoaded] = useState(false);
   const [scoreLog, setScoreLog] = useState<{ score: number; night: number; who: string; ts: number }[]>([]);
+  const [authToken, setAuthToken] = useState("");
+  const [authUser, setAuthUser] = useState<{ id?: string; username: string; email?: string; role?: string; verified?: boolean } | null>(null);
+  const [userStats, setUserStats] = useState<{ best: number; sessions: number; highest_night: number; total_score: number } | null>(null);
+  const [loginUser, setLoginUser] = useState("");
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPass, setLoginPass] = useState("");
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authError, setAuthError] = useState("");
+  const [registerMode, setRegisterMode] = useState(false);
+  const [remoteScores, setRemoteScores] = useState<{ username: string; score: number; night: number }[]>([]);
+  const [remoteLoading, setRemoteLoading] = useState(false);
+  const [profileAvatar, setProfileAvatar] = useState("");
+  const [profileBio, setProfileBio] = useState("");
+  const [seedName, setSeedName] = useState("");
+  const [seeds, setSeeds] = useState<any[]>([]);
+  const [seedBusy, setSeedBusy] = useState(false);
+  const [currentSeed, setCurrentSeed] = useState("");
+  const [publicSeeds, setPublicSeeds] = useState<any[]>([]);
+  const [seedSearch, setSeedSearch] = useState("");
+  const [postBody, setPostBody] = useState("");
+  const [posts, setPosts] = useState<any[]>([]);
+  const [socialLoading, setSocialLoading] = useState(false);
+  const [commentsByPost, setCommentsByPost] = useState<Record<string, any[]>>({});
+  const [commentDraft, setCommentDraft] = useState<Record<string, string>>({});
+  const [commentReplyTo, setCommentReplyTo] = useState<Record<string, string | null>>({});
+  const [profileSearch, setProfileSearch] = useState("");
+  const [profileResults, setProfileResults] = useState<any[]>([]);
+  const [messageFriends, setMessageFriends] = useState<any[]>([]);
+  const [profileView, setProfileView] = useState<any | null>(null);
+  const [profileStats, setProfileStats] = useState<any | null>(null);
+  const [profileFollowers, setProfileFollowers] = useState(0);
+  const [profileFollowing, setProfileFollowing] = useState(0);
+  const [profileIsFollowing, setProfileIsFollowing] = useState(false);
+  const [profileIsFriend, setProfileIsFriend] = useState(false);
+  const [profileFeatured, setProfileFeatured] = useState<string[]>([]);
+  const [profileLikedPosts, setProfileLikedPosts] = useState<SocialPost[]>([]);
+  const [profileFavoritePosts, setProfileFavoritePosts] = useState<SocialPost[]>([]);
+  const [profilePosts, setProfilePosts] = useState<SocialPost[]>([]);
+  const [dmDraft, setDmDraft] = useState("");
+  const [dmMessages, setDmMessages] = useState<any[]>([]);
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [messageUser, setMessageUser] = useState<any | null>(null);
+  const [messageSearch, setMessageSearch] = useState("");
+  const [featuredAchievements, setFeaturedAchievements] = useState<string[]>([]);
+  const [accountUsername, setAccountUsername] = useState("");
+  const [accountEmail, setAccountEmail] = useState("");
+  const [accountCurrentPass, setAccountCurrentPass] = useState("");
+  const [accountNewPass, setAccountNewPass] = useState("");
+  const [accountMsg, setAccountMsg] = useState("");
+  const [adminNoticeTitle, setAdminNoticeTitle] = useState("");
+  const [adminNoticeBody, setAdminNoticeBody] = useState("");
+  const [adminNoticeFrom, setAdminNoticeFrom] = useState("");
+  const [achievementSearch, setAchievementSearch] = useState("");
+  const [feedSearch, setFeedSearch] = useState("");
+  const [recents, setRecents] = useState<SocialRecentItem[]>([]);
 
   // menu selection
   const [bgPick, setBgPick] = useState<"back1" | "back2" | "back3">("back1");
@@ -851,8 +963,6 @@ export default function App() {
   const [jump, setJump] = useState<{ visible: boolean; who?: string; img?: any; reason?: string; win?: boolean }>({ visible: false });
   const [damageInfo, setDamageInfo] = useState("");
 
-  const [profilePass, setProfilePass] = useState("");
-
   // tasks / events / extras
   const [tasks, setTasks] = useState<TaskState[]>([]);
   const [taskOpen, setTaskOpen] = useState(false);
@@ -886,6 +996,9 @@ export default function App() {
   const [dealOpen, setDealOpen] = useState(false);
   const [dealChoice, setDealChoice] = useState<"POWER" | "HEAT" | null>(null);
   const [dealUntil, setDealUntil] = useState(0);
+
+  const settingsReadyRef = useRef(false);
+  const settingsSaveTimeout = useRef<any>(null);
 
   // refs
   const charsRef = useRef<RunningChar[]>([]);
@@ -1004,6 +1117,8 @@ export default function App() {
         if (v) setBest(parseInt(v, 10) || 0);
         const profile = await AsyncStorage.getItem(PROFILE_KEY);
         if (profile) setProfileName(profile);
+        const auth = await AsyncStorage.getItem(AUTH_KEY);
+        if (auth) setAuthToken(auth);
         const log = await AsyncStorage.getItem(SCORE_LOG_KEY);
         if (log) setScoreLog(JSON.parse(log));
         const c = await AsyncStorage.getItem(CREDITS_KEY);
@@ -1024,6 +1139,8 @@ export default function App() {
         if (skillRaw) setSkills(JSON.parse(skillRaw));
         const contractRaw = await AsyncStorage.getItem(CONTRACT_KEY);
         if (contractRaw) setContracts(JSON.parse(contractRaw));
+        const recentsRaw = await AsyncStorage.getItem(RECENTS_KEY);
+        if (recentsRaw) setRecents(JSON.parse(recentsRaw));
       } catch {}
       setProfileLoaded(true);
     })();
@@ -1173,6 +1290,140 @@ export default function App() {
       playThroughEarpieceAndroid: false,
     }).catch(() => {});
   }, [audioEnabled]);
+
+  useEffect(() => {
+    if (screen !== "SCORES") return;
+    setRemoteLoading(true);
+    fetch(apiUrl("score_leaderboard"))
+      .then((r) => r.json())
+      .then((d) => {
+        const arr = Array.isArray(d?.scores) ? d.scores : [];
+        const bestByUser = new Map<string, { username: string; score: number; night: number }>();
+        for (const s of arr) {
+          const key = String(s.username || "unknown");
+          const prev = bestByUser.get(key);
+          if (!prev || Number(s.score) > Number(prev.score)) {
+            bestByUser.set(key, { username: key, score: Number(s.score) || 0, night: Number(s.night) || 0 });
+          }
+        }
+        const deduped = Array.from(bestByUser.values()).sort((a, b) => b.score - a.score);
+        setRemoteScores(deduped);
+      })
+      .catch(() => setRemoteScores([]))
+      .finally(() => setRemoteLoading(false));
+  }, [screen]);
+
+  useEffect(() => {
+    if (!authToken) {
+      setAuthUser(null);
+      return;
+    }
+    fetch(apiUrl("auth_me"), { headers: { Authorization: `Bearer ${authToken}` } })
+      .then((r) => r.json())
+      .then(async (d) => {
+        setAuthUser(d?.user ?? null);
+        const uname = d?.user?.username;
+        if (d?.user?.username) setAccountUsername(d.user.username);
+        if (d?.user?.email) setAccountEmail(d.user.email);
+        if (uname) {
+          try {
+            const prof = await apiGet(`profile_get?username=${encodeURIComponent(uname)}`);
+            setProfileAvatar(prof?.profile?.avatar_url ?? "");
+            setProfileBio(prof?.profile?.bio ?? "");
+          } catch {}
+        }
+      })
+      .catch(() => {});
+  }, [authToken]);
+
+  useEffect(() => {
+    if (!authToken) {
+      setUserStats(null);
+      settingsReadyRef.current = false;
+      return;
+    }
+    settingsReadyRef.current = false;
+    (async () => {
+      try {
+        const s = await apiGet("settings_get");
+        if (s?.settings) applySettings(s.settings);
+      } catch {}
+      try {
+        const st = await apiGet("stats_get");
+        setUserStats(st?.stats ?? null);
+      } catch {}
+      try {
+        const sl = await apiGet("seeds_list");
+        setSeeds(sl?.seeds ?? []);
+      } catch {}
+      setTimeout(() => {
+        settingsReadyRef.current = true;
+      }, 800);
+    })();
+  }, [authToken]);
+
+  useEffect(() => {
+    if (!authToken || !settingsReadyRef.current) return;
+    if (settingsSaveTimeout.current) clearTimeout(settingsSaveTimeout.current);
+    settingsSaveTimeout.current = setTimeout(() => {
+      apiPost("settings_update", { settings: buildSettings() }).catch(() => {});
+    }, 900);
+  }, [authToken, bgPick, difficultyPreset, mode, modePreset, modeTier, dailyRun, night6, hardcore, selected, customLevels, challenge, featuredAchievements]);
+
+  useEffect(() => {
+    if (screen !== "SOCIAL") return;
+    setSocialLoading(true);
+    const feedEndpoint = authToken ? "posts_list" : "posts_public_list";
+    apiGet(feedEndpoint)
+      .then((d) => setPosts(d?.posts ?? []))
+      .catch(() => setPosts([]))
+      .finally(() => setSocialLoading(false));
+    apiGet("profiles_top")
+      .then((d) => setProfileResults(d?.results ?? []))
+      .catch(() => setProfileResults([]));
+  }, [screen, authToken]);
+
+  useEffect(() => {
+    const query = profileSearch.trim();
+    if (!query) return;
+    const timer = setTimeout(() => {
+      apiGet(`profiles_search?q=${encodeURIComponent(query)}`)
+        .then((d) => setProfileResults(d?.results ?? []))
+        .catch(() => setProfileResults([]));
+    }, 420);
+    return () => clearTimeout(timer);
+  }, [profileSearch]);
+
+  useEffect(() => {
+    if (screen !== "SEEDS") return;
+    apiGet("seeds_public_list")
+      .then((d) => setPublicSeeds(d?.seeds ?? []))
+      .catch(() => setPublicSeeds([]));
+    if (authToken) {
+      apiGet("seeds_list")
+        .then((d) => setSeeds(d?.seeds ?? []))
+        .catch(() => setSeeds([]));
+    }
+  }, [screen, authToken]);
+
+  useEffect(() => {
+    if (screen !== "MESSAGES") return;
+    if (!authToken) {
+      setMessageFriends([]);
+      return;
+    }
+    apiGet("friends_list")
+      .then((d) => setMessageFriends(d?.friends ?? []))
+      .catch(() => setMessageFriends([]));
+  }, [screen, authToken]);
+
+  useEffect(() => {
+    if (screen !== "NOTIFS") return;
+    if (!authToken) return;
+    apiGet("notifications_list")
+      .then((d) => setNotifications(d?.notifications ?? []))
+      .catch(() => setNotifications([]));
+  }, [screen, authToken]);
 
   useEffect(() => {
     if (!cutsceneOpen) return;
@@ -1344,9 +1595,10 @@ export default function App() {
   const startGame = () => {
     if (!canStart) return;
 
-    const seed = seedFromDate(dateKey());
-    rngRef.current = dailyRun ? mulberry32(seed) : Math.random;
-    randGlobal = dailyRun ? rngRef.current : Math.random;
+    const seed = dailyRun ? seedFromDate(dateKey()) : Math.floor(Math.random() * 1_000_000_000);
+    rngRef.current = mulberry32(seed);
+    randGlobal = rngRef.current;
+    setCurrentSeed(String(seed));
     ghostBufferRef.current = {};
     scanCountRef.current = 0;
     tasksDoneRef.current = 0;
@@ -1571,12 +1823,243 @@ export default function App() {
     eventLogRef.current = next;
   };
 
+  const apiUrl = (path: string) => {
+    if (API_BASE) return `${API_BASE}${path}`;
+    return `/.netlify/functions/${path}`;
+  };
+
+  const apiGet = async (path: string) => {
+    const res = await fetch(apiUrl(path), { headers: authToken ? { Authorization: `Bearer ${authToken}` } : undefined });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.error || "Request failed");
+    return data;
+  };
+
+  const apiPost = async (path: string, body: any) => {
+    const res = await fetch(apiUrl(path), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+      },
+      body: JSON.stringify(body ?? {}),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.error || "Request failed");
+    return data;
+  };
+
+  const authRequest = async (path: string, body: any) => {
+    const res = await fetch(apiUrl(path), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.error || "Auth failed");
+    return data;
+  };
+
+  const submitScore = async (scoreVal: number, nightVal: number) => {
+    if (!authToken) return;
+    try {
+      await fetch(apiUrl("score_submit"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
+        body: JSON.stringify({ score: scoreVal, night: nightVal }),
+      });
+      const st = await apiGet("stats_get");
+      setUserStats(st?.stats ?? null);
+    } catch {}
+  };
+
+  const doLogout = async () => {
+    setAuthToken("");
+    setAuthUser(null);
+    setUserStats(null);
+    setSeeds([]);
+    setPosts([]);
+    setProfileName("");
+    setRecents([]);
+    setMessageFriends([]);
+    setProfileIsFriend(false);
+    setProfileLikedPosts([]);
+    setProfileFavoritePosts([]);
+    setCommentDraft({});
+    setCommentReplyTo({});
+    setScoreLog([]);
+    setMessageUser(null);
+    setDmMessages([]);
+    try {
+      await AsyncStorage.multiRemove([AUTH_KEY, PROFILE_KEY, RECENTS_KEY]);
+    } catch {}
+    setScreen("LOGIN");
+  };
+
   const spendCredits = (cost: number) => {
     setCredits((c) => {
       const next = Math.max(0, c - cost);
       AsyncStorage.setItem(CREDITS_KEY, String(next)).catch(() => {});
       return next;
     });
+  };
+
+  const buildSettings = () => ({
+    bgPick,
+    difficultyPreset,
+    mode,
+    modePreset,
+    modeTier,
+    dailyRun,
+    night6,
+    hardcore,
+    selected,
+    customLevels,
+    challenge,
+    featuredAchievements,
+  });
+
+  const applySettings = (s: any) => {
+    if (!s || typeof s !== "object") return;
+    if (s.bgPick) setBgPick(s.bgPick);
+    if (s.difficultyPreset) setDifficultyPreset(s.difficultyPreset);
+    if (s.mode) setMode(s.mode);
+    if (s.modePreset) setModePreset(s.modePreset);
+    if (typeof s.modeTier === "number") setModeTier(s.modeTier);
+    if (typeof s.dailyRun === "boolean") setDailyRun(s.dailyRun);
+    if (typeof s.night6 === "boolean") setNight6(s.night6);
+    if (typeof s.hardcore === "boolean") setHardcore(s.hardcore);
+    if (s.selected && typeof s.selected === "object") setSelected(s.selected);
+    if (s.customLevels && typeof s.customLevels === "object") setCustomLevels(s.customLevels);
+    if (s.challenge && typeof s.challenge === "object") setChallenge((c) => ({ ...c, ...s.challenge }));
+    if (Array.isArray(s.featuredAchievements)) setFeaturedAchievements(s.featuredAchievements);
+  };
+
+  const kmpIndex = (text: string, pattern: string) => {
+    if (!pattern) return 0;
+    const t = text.toLowerCase();
+    const p = pattern.toLowerCase();
+    const lps = new Array(p.length).fill(0);
+    let len = 0;
+    for (let i = 1; i < p.length; ) {
+      if (p[i] === p[len]) {
+        lps[i++] = ++len;
+      } else if (len) {
+        len = lps[len - 1];
+      } else {
+        lps[i++] = 0;
+      }
+    }
+    let i = 0;
+    let j = 0;
+    while (i < t.length) {
+      if (t[i] === p[j]) {
+        i++;
+        j++;
+        if (j === p.length) return i - j;
+      } else if (j) {
+        j = lps[j - 1];
+      } else {
+        i++;
+      }
+    }
+    return -1;
+  };
+
+  const openMessageUser = async (user: any) => {
+    if (!user?.id) return;
+    setMessageUser(user);
+    try {
+      const d = await apiGet(`messages_list?withUserId=${encodeURIComponent(user.id)}`);
+      setDmMessages(d?.messages ?? []);
+    } catch {}
+  };
+
+  const handleAdminDeleteMessage = async (messageId: string) => {
+    if (!authToken || !isAdminUser || !messageUser?.id) return;
+    try {
+      await apiPost("admin_delete_message", { messageId });
+      const d = await apiGet(`messages_list?withUserId=${encodeURIComponent(messageUser.id)}`);
+      setDmMessages(d?.messages ?? []);
+    } catch {}
+  };
+
+  const handleAdminEditMessage = async (messageId: string, body: string) => {
+    if (!authToken || !isAdminUser || !messageUser?.id) return;
+    try {
+      await apiPost("admin_edit_message", { messageId, body });
+      const d = await apiGet(`messages_list?withUserId=${encodeURIComponent(messageUser.id)}`);
+      setDmMessages(d?.messages ?? []);
+    } catch {}
+  };
+
+  const handleAdminNotifyAll = async () => {
+    if (!authToken || !isAdminUser) return;
+    const title = adminNoticeTitle.trim();
+    const body = adminNoticeBody.trim();
+    const from = adminNoticeFrom.trim() || authUser?.username || "System";
+    if (!title && !body) return;
+    try {
+      await apiPost("admin_notify_all", { title, body, from });
+      setAdminNoticeTitle("");
+      setAdminNoticeBody("");
+      setAdminNoticeFrom("");
+    } catch {}
+  };
+
+  const openProfile = async (username: string) => {
+    try {
+      if (username) {
+        addRecent({ id: `profile:${username}`, type: "profile", label: username, ts: Date.now() });
+      }
+      const d = await apiGet(`profile_full?username=${encodeURIComponent(username)}`);
+      setProfileView(d?.profile ?? null);
+      setProfileStats(d?.stats ?? null);
+      setProfileFollowers(d?.followers ?? 0);
+      setProfileFollowing(d?.following ?? 0);
+      setProfileIsFollowing(!!d?.is_following);
+      setProfileIsFriend(!!d?.is_friend);
+      const feat = parseJson(d?.featured_achievements);
+      setProfileFeatured(Array.isArray(feat) ? feat : []);
+      try {
+        const p = await apiGet(`posts_user_list?username=${encodeURIComponent(username)}`);
+        setProfilePosts(p?.posts ?? []);
+      } catch {
+        setProfilePosts([]);
+      }
+      if (authUser?.username && d?.profile?.username && authUser.username === d.profile.username) {
+        try {
+          const liked = await apiGet("posts_liked_list");
+          setProfileLikedPosts(liked?.posts ?? []);
+        } catch {
+          setProfileLikedPosts([]);
+        }
+        try {
+          const favs = await apiGet("posts_favorites_list");
+          setProfileFavoritePosts(favs?.posts ?? []);
+        } catch {
+          setProfileFavoritePosts([]);
+        }
+      } else {
+        setProfileLikedPosts([]);
+        setProfileFavoritePosts([]);
+      }
+      setDmMessages([]);
+      setDmDraft("");
+      setScreen("PROFILE");
+    } catch {}
+  };
+
+  const parseJson = (v: any) => {
+    if (!v) return v;
+    if (typeof v === "string") {
+      try {
+        return JSON.parse(v);
+      } catch {
+        return v;
+      }
+    }
+    return v;
   };
 
   const rarityColor = (r: "common" | "rare" | "epic") => {
@@ -2852,6 +3335,7 @@ export default function App() {
       });
       creditsAwardedRef.current = true;
     }
+    submitScore(score, night);
   }, [jump.visible]);
 
   const getCamPosition = (view: CameraView, charId: string): CamPos => {
@@ -2923,20 +3407,13 @@ export default function App() {
   };
 
   // ===== UI components =====
-  const SoftButton = ({
+  const SoftButton: React.FC<SocialSoftButtonProps> = ({
     title,
     sub,
     onPress,
     disabled,
     tone = "neutral",
     powerGate,
-  }: {
-    title: string;
-    sub?: string;
-    onPress: () => void;
-    disabled?: boolean;
-    tone?: "neutral" | "danger" | "good";
-    powerGate?: boolean;
   }) => {
     const bg =
       tone === "danger" ? "rgba(220,70,70,0.18)" : tone === "good" ? "rgba(70,220,140,0.16)" : "rgba(255,255,255,0.10)";
@@ -2965,6 +3442,195 @@ export default function App() {
       </Pressable>
     );
   };
+
+  const isAdminUser = authUser?.role === "admin";
+
+  const handleCreatePost = async () => {
+    if (!authToken || !postBody.trim()) return;
+    try {
+      const snapshot = {
+        best: userStats?.best ?? best,
+        last: scoreLog[0]?.score ?? 0,
+        night: scoreLog[0]?.night ?? 0,
+      };
+      await apiPost("post_create", { body: postBody.trim(), snapshot });
+      setPostBody("");
+      const d = await apiGet("posts_list");
+      setPosts(d?.posts ?? []);
+    } catch {}
+  };
+
+  const handleFollowToggle = async (post: SocialPost) => {
+    if (!authToken || !post.user_id) return;
+    try {
+      const d = await apiPost("follow_toggle", { userId: post.user_id });
+      setPosts((arr) => arr.map((it) => (it.id === post.id ? { ...it, following: d?.following } : it)));
+    } catch {}
+  };
+
+  const handleLikeToggle = async (postId: string) => {
+    if (!authToken) return;
+    try {
+      const d = await apiPost("like_toggle", { postId });
+      setPosts((arr) =>
+        arr.map((it) =>
+          it.id === postId
+            ? {
+                ...it,
+                liked: d?.liked,
+                likes_count: Math.max(0, Number.isFinite(d?.likesCount) ? d.likesCount : it.likes_count ?? 0),
+              }
+            : it
+        )
+      );
+    } catch {}
+  };
+
+  const handleFavoriteToggle = async (postId: string) => {
+    if (!authToken) return;
+    try {
+      const d = await apiPost("favorite_toggle", { postId });
+      setPosts((arr) =>
+        arr.map((it) =>
+          it.id === postId
+            ? {
+                ...it,
+                favorited: d?.favorited,
+                favorites_count: Math.max(0, Number.isFinite(d?.favoritesCount) ? d.favoritesCount : it.favorites_count ?? 0),
+              }
+            : it
+        )
+      );
+    } catch {}
+  };
+
+  const handleFetchComments = async (postId: string) => {
+    if (!authToken) return;
+    try {
+      const d = await apiGet(`comments_list?postId=${encodeURIComponent(postId)}`);
+      setCommentsByPost((c) => ({ ...c, [postId]: d?.comments ?? [] }));
+    } catch {}
+  };
+
+  const handleAddComment = async (postId: string) => {
+    if (!authToken) return;
+    const body = commentDraft[postId]?.trim();
+    if (!body) return;
+    const parentId = commentReplyTo[postId] ?? null;
+    try {
+      await apiPost("comment_add", { postId, body, parentId });
+      setCommentDraft((d) => ({ ...d, [postId]: "" }));
+      setCommentReplyTo((r) => ({ ...r, [postId]: null }));
+      const d = await apiGet(`comments_list?postId=${encodeURIComponent(postId)}`);
+      setCommentsByPost((c) => ({ ...c, [postId]: d?.comments ?? [] }));
+    } catch {}
+  };
+
+  const handleDeletePost = async (postId: string) => {
+    if (!authToken || !isAdminUser) return;
+    try {
+      await apiPost("admin_delete_post", { postId });
+      setPosts((arr) => arr.filter((it) => it.id !== postId));
+    } catch {}
+  };
+
+  const handleEditPost = async (postId: string, body: string) => {
+    if (!authToken || !isAdminUser) return;
+    const trimmed = body.trim();
+    if (!trimmed) return;
+    try {
+      await apiPost("admin_edit_post", { postId, body: trimmed });
+      setPosts((arr) => arr.map((it) => (it.id === postId ? { ...it, body: trimmed } : it)));
+    } catch {}
+  };
+
+  const handleDeleteComment = async (postId: string, commentId: string) => {
+    if (!authToken || !isAdminUser) return;
+    try {
+      await apiPost("admin_delete_comment", { commentId });
+      const d = await apiGet(`comments_list?postId=${encodeURIComponent(postId)}`);
+      setCommentsByPost((s) => ({ ...s, [postId]: d?.comments ?? [] }));
+    } catch {}
+  };
+
+  const saveRecents = (next: SocialRecentItem[]) => {
+    setRecents(next);
+    AsyncStorage.setItem(RECENTS_KEY, JSON.stringify(next)).catch(() => {});
+  };
+
+  const addRecent = (item: SocialRecentItem) => {
+    setRecents((prev) => {
+      const next = [item, ...prev.filter((r) => r.id !== item.id)]
+        .sort((a, b) => b.ts - a.ts)
+        .slice(0, 12);
+      AsyncStorage.setItem(RECENTS_KEY, JSON.stringify(next)).catch(() => {});
+      return next;
+    });
+  };
+
+  const removeRecent = (id: string) => {
+    setRecents((prev) => {
+      const next = prev.filter((r) => r.id !== id);
+      AsyncStorage.setItem(RECENTS_KEY, JSON.stringify(next)).catch(() => {});
+      return next;
+    });
+  };
+
+  const handleProfileFollowToggle = async () => {
+    if (!authToken || !profileView?.id) return;
+    try {
+      const d = await apiPost("follow_toggle", { userId: profileView.id });
+      setProfileIsFollowing(!!d?.following);
+      if (Number.isFinite(d?.followers)) setProfileFollowers(Math.max(0, d.followers));
+    } catch {}
+  };
+
+  const handleRefreshProfile = () => {
+    if (profileView?.username) openProfile(profileView.username);
+  };
+
+  const handleLoadProfileMessages = async () => {
+    if (!authToken || !profileView?.id || !profileIsFriend) return;
+    try {
+      const d = await apiGet(`messages_list?withUserId=${encodeURIComponent(profileView.id)}`);
+      setDmMessages(d?.messages ?? []);
+    } catch {}
+  };
+
+  const handleSendMessageToProfile = async () => {
+    if (!authToken || !profileView?.id || !dmDraft.trim() || !profileIsFriend) return;
+    try {
+      await apiPost("message_send", { toUserId: profileView.id, body: dmDraft.trim() });
+      setDmDraft("");
+      await handleLoadProfileMessages();
+    } catch {}
+  };
+
+  const handleSendMessageInChat = async () => {
+    if (!authToken || !messageUser?.id || !dmDraft.trim()) return;
+    try {
+      await apiPost("message_send", { toUserId: messageUser.id, body: dmDraft.trim() });
+      setDmDraft("");
+      await openMessageUser(messageUser);
+    } catch {}
+  };
+
+  const handleAdminAction = async (action: "admin" | "user" | "verify" | "unverify") => {
+    if (!authToken || !isAdminUser || !profileView?.id) return;
+    try {
+      if (action === "admin" || action === "user") {
+        await apiPost("admin_user_role", { userId: profileView.id, role: action === "admin" ? "admin" : "user" });
+      } else {
+        await apiPost("admin_verify_user", { userId: profileView.id, verified: action === "verify" });
+      }
+      openProfile(profileView.username);
+    } catch {}
+  };
+
+  const navHome = () => setScreen("MENU");
+  const navMessages = () => setScreen("MESSAGES");
+  const navExplore = () => setScreen("SOCIAL");
+  const navSettings = () => setScreen("ACCOUNT");
 
   const MenuNavButton = ({
     title,
@@ -3058,75 +3724,63 @@ export default function App() {
     );
   }
 
+
   if (screen === "LOGIN") {
     return (
-      <SafeAreaView style={styles.root}>
-        <StatusBar barStyle="light-content" />
-        <ImageBackground source={IMG.rooms.holprincipal} style={styles.bg} resizeMode="cover">
-          <View style={styles.loginBackdrop} />
-          <View style={styles.loginWrap}>
-            <View style={[styles.loginCard, shadow as any]}>
-              <Text style={styles.loginKicker}>Security Access</Text>
-              <Text style={styles.loginTitle}>Acces Bodyguard</Text>
-              <Text style={styles.loginSub}>Intră cu user + parolă pentru a salva scoruri.</Text>
-
-              <Text style={styles.loginLabel}>Username</Text>
-              <TextInput
-                value={profileName}
-                onChangeText={setProfileName}
-                placeholder="Nume / Call-sign"
-                placeholderTextColor="rgba(220,220,230,0.45)"
-                style={styles.loginInput}
-                autoCapitalize="none"
-              />
-
-              <Text style={styles.loginLabel}>Parolă</Text>
-              <TextInput
-                value={profilePass}
-                onChangeText={setProfilePass}
-                placeholder="••••••••"
-                placeholderTextColor="rgba(220,220,230,0.45)"
-                style={styles.loginInput}
-                secureTextEntry
-              />
-
-              <Text style={styles.loginHint}>Tip: parola nu este salvată, e doar pentru atmosferă.</Text>
-
-              <SoftButton
-                title="LOGIN"
-                tone="good"
-                disabled={!profileName.trim() || !profilePass.trim()}
-                onPress={async () => {
-                  if (!profileName.trim()) return;
-                  await AsyncStorage.setItem(PROFILE_KEY, profileName.trim());
-                  setProfilePass("");
-                  setScreen("MENU");
-                }}
-              />
-            </View>
-          </View>
-        </ImageBackground>
-        {helpOpen && (
-          <View style={styles.modalWrap}>
-            <View style={[styles.modalCard, shadow as any]}>
-              <Text style={styles.modalTitle}>HELP</Text>
-              <Text style={styles.modalSub}>Controls & tips</Text>
-              <View style={{ height: 8 }} />
-              {HELP_LINES.map((line, i) => (
-                <Text key={`${line}-${i}`} style={styles.helpLine}>• {line}</Text>
-              ))}
-              {Platform.OS === "web" && (
-                <View style={{ marginTop: 10 }}>
-                  <Text style={styles.helpLine}>Keybinds: Q/E uși, Z/X vent, C cam, L lure, M music, R reset, F light, G gen, V overclock.</Text>
-                  <Text style={styles.helpLine}>T tasks, O alarm, P ping, +/- fan, ←/→ camere, H help, Esc meniu.</Text>
-                </View>
-              )}
-              <View style={{ height: 10 }} />
-              <SoftButton title="ÎNCHIDE" onPress={() => setHelpOpen(false)} />
-            </View>
-          </View>
-        )}
-      </SafeAreaView>
+      <LoginScreen
+        loginUser={loginUser}
+        loginEmail={loginEmail}
+        loginPass={loginPass}
+        registerMode={registerMode}
+        authLoading={authLoading}
+        authError={authError}
+        onUserChange={setLoginUser}
+        onEmailChange={setLoginEmail}
+        onPassChange={setLoginPass}
+        onToggleRegister={() => setRegisterMode((v) => !v)}
+        onGuest={async () => {
+          setAuthError("");
+          setAuthToken("");
+          setAuthUser(null);
+          setProfileName("Guest");
+          setScoreLog([]);
+          try {
+            await AsyncStorage.multiRemove([AUTH_KEY, PROFILE_KEY]);
+          } catch {}
+          setScreen("MENU");
+        }}
+        onSubmit={async () => {
+          try {
+            setAuthError("");
+            setAuthLoading(true);
+            const data = await authRequest(registerMode ? "auth_register" : "auth_login", {
+              username: loginUser.trim(),
+              email: loginEmail.trim(),
+              password: loginPass,
+            });
+            const token = data?.token;
+            const user = data?.user;
+            if (token) {
+              setAuthToken(token);
+              await AsyncStorage.setItem(AUTH_KEY, token);
+            }
+            if (user) {
+              setAuthUser(user);
+            }
+            if (user?.username) {
+              setProfileName(user.username);
+              await AsyncStorage.setItem(PROFILE_KEY, user.username);
+            }
+            setScoreLog([]);
+            setLoginPass("");
+            setScreen("MENU");
+          } catch (e) {
+            setAuthError(e?.message || "Auth failed");
+          } finally {
+            setAuthLoading(false);
+          }
+        }}
+      />
     );
   }
 
@@ -3141,7 +3795,7 @@ export default function App() {
         <StatusBar barStyle="light-content" />
         <ImageBackground source={IMG.rooms[bgPick]} style={styles.bg} resizeMode="cover">
           <View style={styles.overlay} />
-          <View style={styles.scoreWrap}>
+          <ScrollView contentContainerStyle={styles.socialWrap}>
             <View style={[styles.scoreCard, shadow as any]}>
               <Text style={styles.scoreTitle}>Scoreboard</Text>
               <Text style={styles.scoreSub}>Ultimele 20 de runde</Text>
@@ -3174,10 +3828,26 @@ export default function App() {
                 </View>
               ))}
 
+              <View style={{ height: 14 }} />
+              <Text style={styles.scoreSub}>Leaderboard (global)</Text>
+              <View style={{ height: 6 }} />
+              {remoteLoading && <Text style={styles.scoreEmpty}>Se încarcă...</Text>}
+              {!remoteLoading && remoteScores.length === 0 && <Text style={styles.scoreEmpty}>Niciun scor global.</Text>}
+              {remoteScores.map((it, i) => (
+                <View key={`remote-${it.username}-${i}`} style={styles.scoreRow}>
+                  <Text style={styles.scoreIdx}>#{i + 1}</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.scoreName}>{it.username}</Text>
+                    <Text style={styles.scoreMeta}>Night {it.night}</Text>
+                  </View>
+                  <Text style={styles.scoreVal}>{it.score}</Text>
+                </View>
+              ))}
+
               <View style={{ height: 10 }} />
               <SoftButton title="ÎNAPOI" onPress={() => setScreen("MENU")} />
             </View>
-          </View>
+          </ScrollView>
         </ImageBackground>
         <HelpModal />
       </SafeAreaView>
@@ -3185,21 +3855,35 @@ export default function App() {
   }
 
   if (screen === "STATS") {
-    const avg = scoreLog.length ? Math.round(scoreLog.reduce((s, x) => s + x.score, 0) / scoreLog.length) : 0;
-    const bestNight = scoreLog.reduce((m, x) => Math.max(m, x.night), 0);
+    const localTotal = scoreLog.reduce((s, x) => s + x.score, 0);
+    const localBestNight = scoreLog.reduce((m, x) => Math.max(m, x.night), 0);
+    const s = authToken && userStats
+      ? {
+          best: userStats.best,
+          sessions: userStats.sessions,
+          highestNight: userStats.highest_night,
+          totalScore: userStats.total_score,
+        }
+      : {
+          best,
+          sessions: scoreLog.length,
+          highestNight: localBestNight,
+          totalScore: localTotal,
+        };
+    const avg = s.sessions ? Math.round(s.totalScore / s.sessions) : 0;
     return (
       <SafeAreaView style={styles.root}>
         <StatusBar barStyle="light-content" />
         <ImageBackground source={IMG.rooms[bgPick]} style={styles.bg} resizeMode="cover">
           <View style={styles.overlay} />
-          <View style={styles.statsWrap}>
+          <ScrollView contentContainerStyle={styles.socialWrap}>
             <View style={[styles.statsCard, shadow as any]}>
               <Text style={styles.scoreTitle}>Statistici</Text>
               <Text style={styles.scoreSub}>Profil: {profileName || "Anonim"}</Text>
               <View style={{ height: 14 }} />
               <View style={styles.statsRow}>
                 <Text style={styles.statsLabel}>Best</Text>
-                <Text style={styles.statsVal}>{best}</Text>
+                <Text style={styles.statsVal}>{s.best}</Text>
               </View>
               <View style={styles.statsRow}>
                 <Text style={styles.statsLabel}>Avg Score</Text>
@@ -3207,16 +3891,20 @@ export default function App() {
               </View>
               <View style={styles.statsRow}>
                 <Text style={styles.statsLabel}>Highest Night</Text>
-                <Text style={styles.statsVal}>{bestNight}</Text>
+                <Text style={styles.statsVal}>{s.highestNight}</Text>
               </View>
               <View style={styles.statsRow}>
                 <Text style={styles.statsLabel}>Sessions</Text>
-                <Text style={styles.statsVal}>{scoreLog.length}</Text>
+                <Text style={styles.statsVal}>{s.sessions}</Text>
+              </View>
+              <View style={styles.statsRow}>
+                <Text style={styles.statsLabel}>Total Score</Text>
+                <Text style={styles.statsVal}>{s.totalScore}</Text>
               </View>
               <View style={{ height: 12 }} />
               <Text style={styles.scoreSub}>Achievements</Text>
               <View style={{ height: 6 }} />
-              {ACHIEVEMENTS.map((a) => {
+              {ACHIEVEMENTS.filter((a) => (a.name || "").toLowerCase().includes(achievementSearch.trim().toLowerCase()) || !achievementSearch.trim()).map((a) => {
                 const on = achievements[a.id];
                 return (
                   <View key={a.id} style={styles.achRow}>
@@ -3243,7 +3931,7 @@ export default function App() {
               <View style={{ height: 10 }} />
               <SoftButton title="ÎNAPOI" onPress={() => setScreen("MENU")} />
             </View>
-          </View>
+          </ScrollView>
         </ImageBackground>
       </SafeAreaView>
     );
@@ -3420,177 +4108,509 @@ export default function App() {
       </SafeAreaView>
     );
   }
-  if (screen === "MENU") {
-    const pulse = menuPulse.interpolate({ inputRange: [0, 1], outputRange: [0.12, 0.22] });
-    const isMobile = SW < 820;
-    const cardRise = menuIntro.interpolate({ inputRange: [0, 1], outputRange: [18, 0] });
-    const cardFade = menuIntro.interpolate({ inputRange: [0, 1], outputRange: [0, 1] });
-    const cardDelay = (i: number) => ({
-      transform: [{ translateY: Animated.add(cardRise, new Animated.Value(i * 4)) }],
-      opacity: cardFade,
-    });
-
+  if (screen === "ACCOUNT") {
     return (
       <SafeAreaView style={styles.root}>
         <StatusBar barStyle="light-content" />
-        <ImageBackground source={IMG.rooms.holprincipal} style={styles.menuBg} resizeMode="cover">
-          <View style={styles.menuBgOverlay} />
-          <View style={styles.menuBgGlow} />
-
-          <View style={styles.menuHub}>
-            <Animated.View style={[styles.menuHeader, styles.glass, cardDelay(0)]}>
-              <View style={styles.menuBrand}>
-                <View style={styles.menuBrandMark} />
-                <View>
-                  <Text style={styles.menuBrandTitle}>5 DAYS</Text>
-                  <Text style={styles.menuBrandSub}>Birou bodyguard · Parlament</Text>
-                </View>
+        <ImageBackground source={IMG.rooms[bgPick]} style={styles.bg} resizeMode="cover">
+          <View style={styles.overlay} />
+          <ScrollView contentContainerStyle={styles.socialWrap}>
+            <View style={[styles.statsCard, shadow as any]}>
+              <Text style={styles.scoreTitle}>Account</Text>
+              <Text style={styles.scoreSub}>Sesiune securizată (server)</Text>
+              <View style={{ height: 14 }} />
+              <View style={styles.statsRow}>
+                <Text style={styles.statsLabel}>Username</Text>
+                <Text style={styles.statsVal}>{authUser?.username || profileName || "Anonim"}</Text>
               </View>
-              <View style={styles.menuHeaderRight}>
-                <View style={styles.menuProfile}>
-                  <View style={styles.menuAvatar} />
+              <View style={styles.statsRow}>
+                <Text style={styles.statsLabel}>Email</Text>
+                <Text style={styles.statsVal}>{authUser?.email || "-"}</Text>
+              </View>
+              <View style={styles.statsRow}>
+                <Text style={styles.statsLabel}>Status</Text>
+                <Text style={styles.statsVal}>{authToken ? "Autentificat" : "Guest"}</Text>
+              </View>
+              <View style={{ height: 12 }} />
+              <Text style={styles.scoreSub}>Profil public</Text>
+              <View style={{ height: 8 }} />
+              <Image source={resolveAvatarSource(profileAvatar)} style={styles.profileAvatar} />
+              <View style={{ height: 8 }} />
+              <Text style={styles.loginLabel}>Choose Avatar</Text>
+              <View style={styles.avatarGrid}>
+                {CHARACTER_CHOICES.map((c) => {
+                  const token = `local:${c.id}`;
+                  const isOn = profileAvatar === token;
+                  return (
+                    <Pressable
+                      key={c.id}
+                      onPress={async () => {
+                        setProfileAvatar(token);
+                        if (!authToken) return;
+                        try {
+                          await apiPost("profile_update", { avatarUrl: token, bio: profileBio });
+                        } catch {}
+                      }}
+                      style={[styles.avatarTile, isOn && styles.avatarTileOn]}
+                    >
+                      <Image source={c.source} style={styles.avatarTileImg} resizeMode="cover" />
+                    </Pressable>
+                  );
+                })}
+              </View>
+              <Text style={styles.loginLabel}>Bio</Text>
+              <TextInput
+                value={profileBio}
+                onChangeText={setProfileBio}
+                placeholder="Scrie ceva despre tine..."
+                placeholderTextColor="rgba(220,220,230,0.45)"
+                style={[styles.loginInput, { height: 90, textAlignVertical: "top" }]}
+                multiline
+              />
+              <View style={{ height: 8 }} />
+              <SoftButton
+                title="SAVE PROFILE"
+                onPress={async () => {
+                  try {
+                    await apiPost("profile_update", { avatarUrl: profileAvatar, bio: profileBio });
+                  } catch {}
+                }}
+                disabled={!authToken}
+              />
+
+              {authUser?.role === "admin" && authUser?.id && (
+                <View style={{ marginTop: 8 }}>
+                  <Text style={styles.scoreSub}>Admin tools</Text>
+                  <View style={{ height: 6 }} />
+                  <Text style={styles.loginHint}>Admin actions sunt in Profile (user).</Text>
+                  <View style={{ height: 8 }} />
+                  <Text style={styles.loginLabel}>System notice title</Text>
+                  <TextInput
+                    value={adminNoticeTitle}
+                    onChangeText={setAdminNoticeTitle}
+                    placeholder="FNAP system update"
+                    placeholderTextColor="rgba(220,220,230,0.45)"
+                    style={styles.loginInput}
+                  />
+                  <Text style={styles.loginLabel}>System notice body</Text>
+                  <TextInput
+                    value={adminNoticeBody}
+                    onChangeText={setAdminNoticeBody}
+                    placeholder="Message to all players..."
+                    placeholderTextColor="rgba(220,220,230,0.45)"
+                    style={[styles.loginInput, { height: 90, textAlignVertical: "top" }]}
+                    multiline
+                  />
+                  <Text style={styles.loginLabel}>From</Text>
+                  <TextInput
+                    value={adminNoticeFrom}
+                    onChangeText={setAdminNoticeFrom}
+                    placeholder={authUser?.username || "System"}
+                    placeholderTextColor="rgba(220,220,230,0.45)"
+                    style={styles.loginInput}
+                  />
+                  <View style={{ height: 6 }} />
+                  <SoftButton title="SEND SYSTEM NOTICE" onPress={handleAdminNotifyAll} disabled={!authToken} />
+                </View>
+              )}
+
+              <View style={{ height: 10 }} />
+              <Text style={styles.scoreSub}>Account settings</Text>
+              <View style={{ height: 6 }} />
+              <Text style={styles.loginLabel}>Username</Text>
+              <TextInput
+                value={accountUsername}
+                onChangeText={setAccountUsername}
+                placeholder="username"
+                placeholderTextColor="rgba(220,220,230,0.45)"
+                style={styles.loginInput}
+                autoCapitalize="none"
+              />
+              <Text style={styles.loginLabel}>Email</Text>
+              <TextInput
+                value={accountEmail}
+                onChangeText={setAccountEmail}
+                placeholder="email@domain.com"
+                placeholderTextColor="rgba(220,220,230,0.45)"
+                style={styles.loginInput}
+                autoCapitalize="none"
+                keyboardType="email-address"
+              />
+              <Text style={styles.loginLabel}>Current password</Text>
+              <TextInput
+                value={accountCurrentPass}
+                onChangeText={setAccountCurrentPass}
+                placeholder="current password"
+                placeholderTextColor="rgba(220,220,230,0.45)"
+                style={styles.loginInput}
+                secureTextEntry
+              />
+              <Text style={styles.loginLabel}>New password</Text>
+              <TextInput
+                value={accountNewPass}
+                onChangeText={setAccountNewPass}
+                placeholder="new password"
+                placeholderTextColor="rgba(220,220,230,0.45)"
+                style={styles.loginInput}
+                secureTextEntry
+              />
+              <View style={{ height: 8 }} />
+              {!!accountMsg && <Text style={styles.loginHint}>{accountMsg}</Text>}
+              <SoftButton
+                title="SAVE ACCOUNT"
+                onPress={async () => {
+                  if (!authToken) return setScreen("LOGIN");
+                  try {
+                    setAccountMsg("");
+                    const payload = {
+                      username: accountUsername.trim() || undefined,
+                      email: accountEmail.trim() || undefined,
+                      currentPassword: accountCurrentPass || undefined,
+                      newPassword: accountNewPass || undefined,
+                    };
+                    const d = await apiPost("account_update", payload);
+                    if (d?.user) setAuthUser((u) => ({ ...(u ?? {}), ...d.user }));
+                    if (d?.user?.username) setProfileName(d.user.username);
+                    setAccountCurrentPass("");
+                    setAccountNewPass("");
+                    setAccountMsg("Saved");
+                  } catch (e) {
+                    setAccountMsg(e?.message || "Update failed");
+                  }
+                }}
+                disabled={!authToken}
+              />
+              <View style={{ height: 10 }} />
+              <Text style={styles.scoreSub}>Featured achievements</Text>
+              <View style={{ height: 6 }} />
+              <Text style={styles.loginHint}>Select up to 5 in Achievements.</Text>
+              <View style={styles.profileStatsRow}>
+                {featuredAchievements.map((id) => (
+                  <Text key={id} style={styles.profileMeta}>? {ACHIEVEMENTS.find((a) => a.id === id)?.name ?? id}</Text>
+                ))}
+              </View>
+              <SoftButton title="OPEN ACHIEVEMENTS" onPress={() => setScreen("ACHIEVEMENTS")} />
+              <Text style={styles.scoreSub}>Acțiuni</Text>
+              <View style={{ height: 8 }} />
+              <SoftButton title="LOGOUT" tone="bad" onPress={doLogout} disabled={!authToken} />
+              <SoftButton title="ÎNAPOI" onPress={() => setScreen("MENU")} />
+            </View>
+          </ScrollView>
+        </ImageBackground>
+        <HelpModal />
+      </SafeAreaView>
+    );
+  }
+
+  if (screen === "SEEDS") {
+    const canSave = !!authToken && !!seedName.trim();
+    return (
+      <SafeAreaView style={styles.root}>
+        <StatusBar barStyle="light-content" />
+        <ImageBackground source={IMG.rooms[bgPick]} style={styles.bg} resizeMode="cover">
+          <View style={styles.overlay} />
+          <ScrollView contentContainerStyle={styles.seedWrap}>
+            <View style={[styles.seedCard, shadow as any]}>
+              <Text style={styles.scoreTitle}>Seeds</Text>
+              <Text style={styles.scoreSub}>Salveaz? set?rile tale ca seed.</Text>
+              <View style={{ height: 10 }} />
+              <Text style={styles.loginLabel}>Seed name</Text>
+              <TextInput
+                value={seedName}
+                onChangeText={setSeedName}
+                placeholder="Night 2 - Hard"
+                placeholderTextColor="rgba(220,220,230,0.45)"
+                style={styles.loginInput}
+              />
+              <View style={{ height: 8 }} />
+              <View style={styles.seedMetaRow}>
+                <Text style={styles.seedMeta}>Current seed: {currentSeed || "-"}</Text>
+                <Text style={styles.seedMeta}>Mode: {mode}</Text>
+                <Text style={styles.seedMeta}>Difficulty: {difficultyPreset}</Text>
+              </View>
+              <View style={{ height: 8 }} />
+              <SoftButton
+                title={seedBusy ? "SAVING..." : "SAVE SEED"}
+                tone="good"
+                disabled={!canSave || seedBusy}
+                onPress={async () => {
+                  if (!authToken) return setScreen("LOGIN");
+                  try {
+                    setSeedBusy(true);
+                    const cfg = buildSettings();
+                    const seedVal = currentSeed || String(seedFromDate(dateKey()));
+                    await apiPost("seed_create", {
+                      name: seedName.trim(),
+                      seed: seedVal,
+                      mode,
+                      difficulty: difficultyPreset,
+                      config: cfg,
+                    });
+                    setSeedName("");
+                    const sl = await apiGet("seeds_list");
+                    setSeeds(sl?.seeds ?? []);
+                  } catch {}
+                  setSeedBusy(false);
+                }}
+              />
+              {!authToken && <Text style={styles.loginHint}>Trebuie s? fii logat.</Text>}
+            </View>
+
+            <View style={[styles.seedCard, shadow as any]}>
+              <Text style={styles.scoreSub}>Seeds saved</Text>
+              <View style={{ height: 8 }} />
+              {seeds.length === 0 && <Text style={styles.scoreEmpty}>Niciun seed salvat.</Text>}
+              {seeds.map((s) => (
+                <View key={s.id} style={styles.seedRow}>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.menuProfileName}>{profileName || "Player_01"}</Text>
-                    <Text style={styles.menuProfileSub}>Lobby · Credits {credits}</Text>
+                    <Text style={styles.seedName}>{s.name}</Text>
+                    <Text style={styles.seedMeta}>Seed: {s.seed} | {s.mode} | {s.difficulty}</Text>
                   </View>
-                </View>
-                <View style={styles.menuStatusRow}>
-                  <View style={styles.menuPill}><View style={styles.menuDot} /><Text style={styles.menuPillText}>Online</Text></View>
-                  <View style={styles.menuPill}><Text style={styles.menuPillText}>Diff <Text style={styles.menuPillStrong}>{DIFFICULTY_LABEL[difficultyPreset]}</Text></Text></View>
-                  <View style={styles.menuPill}><Text style={styles.menuPillText}>Night <Text style={styles.menuPillStrong}>{night6 ? 6 : 5}</Text></Text></View>
-                </View>
-              </View>
-            </Animated.View>
-
-            <Animated.View style={[styles.quickActions, styles.glass, cardDelay(1)]}>
-              <Text style={styles.quickTitle}>Quick Actions</Text>
-              <View style={styles.quickRow}>
-                <SoftButton title="START" tone="good" disabled={!canStart} onPress={startGame} />
-                <SoftButton title={`DAILY: ${dailyRun ? "ON" : "OFF"}`} onPress={() => setDailyRun((v) => !v)} />
-                <SoftButton title="SELECT" onPress={() => setScreen("SELECT")} />
-                <SoftButton title="WORKSHOP" onPress={() => setScreen("WORKSHOP")} />
-                <SoftButton title="INTEL" onPress={() => setScreen("INTEL")} />
-                <SoftButton title="SCORES" onPress={() => setScreen("SCORES")} />
-                <SoftButton title="STATS" onPress={() => setScreen("STATS")} />
-              </View>
-            </Animated.View>
-
-            <View style={[styles.menuGrid, isMobile && styles.menuGridMobile]}>
-              <Animated.View style={[styles.menuCardBig, isMobile && styles.menuCardMobile, styles.glass, cardDelay(2)]}>
-                <Text style={styles.menuKicker}>Start</Text>
-                <Text style={styles.menuHeroTitle}>New Run</Text>
-                <Text style={styles.menuHeroDesc}>Setări rapide și start instant. Selectează animatronicii sau folosește preset.</Text>
-                <View style={styles.menuHeroActions}>
-                  <SoftButton title="START" tone="good" disabled={!canStart} onPress={startGame} />
                   <SoftButton
-                    title={`DIFFICULTY: ${DIFFICULTY_LABEL[difficultyPreset].toUpperCase()}`}
+                    title="LOAD"
                     onPress={() => {
-                      const idx = DIFFICULTY_ORDER.indexOf(difficultyPreset);
-                      setDifficultyPreset(DIFFICULTY_ORDER[(idx + 1) % DIFFICULTY_ORDER.length]);
+                      const cfg = parseJson(s.config);
+                      if (cfg) applySettings(cfg);
+                      setCurrentSeed(String(s.seed));
+                      setScreen("MENU");
                     }}
                   />
-                    <SoftButton title="SELECT" onPress={() => setScreen("SELECT")} />
                 </View>
-              </Animated.View>
-
-              <Animated.View style={[styles.menuCard, isMobile && styles.menuCardMobile, styles.glass, cardDelay(3)]}>
-                <Text style={styles.menuPanelTitle}>Mode / Preset</Text>
-                <SoftButton
-                  title={`MODE: ${mode}`}
-                  onPress={() => {
-                    const order: GameMode[] = ["STORY", "CUSTOM", "ENDLESS", "CHALLENGE", "STEALTH", "RUSH"];
-                    const idx = order.indexOf(mode);
-                    setMode(order[(idx + 1) % order.length]);
-                  }}
-                />
-                <SoftButton
-                  title={`PRESET: ${modePreset}`}
-                  onPress={() => {
-                    const order: ModePreset[] = ["NORMAL", "OLD_TIMES", "BEST_LEADERS", "ARTISTS", "WRITERS", "MODERN", "SHADOWS"];
-                    const idx = order.indexOf(modePreset);
-                    setModePreset(order[(idx + 1) % order.length]);
-                  }}
-                />
-                <SoftButton title={`TIER: ${modeTier}`} onPress={() => setModeTier((t) => (t % 3) + 1)} />
-              </Animated.View>
-
-              <Animated.View style={[styles.menuCard, isMobile && styles.menuCardMobile, styles.glass, cardDelay(4)]}>
-                <Text style={styles.menuPanelTitle}>Challenges</Text>
-                <View style={styles.menuChallengeRow}>
-                  <SoftButton title={`No Cams ${challenge.noCams ? "ON" : "OFF"}`} onPress={() => setChallenge((c) => ({ ...c, noCams: !c.noCams }))} />
-                  <SoftButton title={`No Doors ${challenge.noDoors ? "ON" : "OFF"}`} onPress={() => setChallenge((c) => ({ ...c, noDoors: !c.noDoors }))} />
-                </View>
-                <View style={styles.menuChallengeRow}>
-                  <SoftButton title={`Double Drain ${challenge.doubleDrain ? "ON" : "OFF"}`} onPress={() => setChallenge((c) => ({ ...c, doubleDrain: !c.doubleDrain }))} />
-                  <SoftButton title={`Only Vents ${challenge.onlyVents ? "ON" : "OFF"}`} onPress={() => setChallenge((c) => ({ ...c, onlyVents: !c.onlyVents }))} />
-                </View>
-                <SoftButton title={`One Battery ${challenge.oneBattery ? "ON" : "OFF"}`} onPress={() => setChallenge((c) => ({ ...c, oneBattery: !c.oneBattery }))} />
-                <View style={{ height: 6 }} />
-                <View style={styles.menuChallengeRow}>
-                  <SoftButton title={`Night 6 ${night6 ? "ON" : "OFF"}`} onPress={() => setNight6((v) => !v)} />
-                  <SoftButton title={`Hardcore ${hardcore ? "ON" : "OFF"}`} onPress={() => setHardcore((v) => !v)} />
-                </View>
-              </Animated.View>
-
-              <Animated.View style={[styles.menuCard, isMobile && styles.menuCardMobile, styles.glass, cardDelay(5)]}>
-                <Text style={styles.menuPanelTitle}>Quick Actions</Text>
-                <SoftButton title="WORKSHOP" onPress={() => setScreen("WORKSHOP")} />
-                <SoftButton title="INTEL" onPress={() => setScreen("INTEL")} />
-                <SoftButton title="SCORES" onPress={() => setScreen("SCORES")} />
-                <SoftButton title="STATS" onPress={() => setScreen("STATS")} />
-                <SoftButton title="HELP" onPress={() => setHelpOpen(true)} />
-              </Animated.View>
-
-              <Animated.View style={[styles.menuCard, isMobile && styles.menuCardMobile, styles.glass, cardDelay(6)]}>
-                <Text style={styles.menuPanelTitle}>Office</Text>
-                <Animated.View style={[styles.bgPicker, { opacity: pulse }]}>
-                  <Text style={styles.bgPickerTitle}>Birou bodyguard:</Text>
-                  <View style={{ flexDirection: "row", gap: 10 }}>
-                    {(["back1", "back2", "back3"] as const).map((k) => {
-                      const active = k === bgPick;
-                      return (
-                        <TouchableOpacity key={k} onPress={() => setBgPick(k)} activeOpacity={0.86} style={[styles.bgThumbWrap, active && styles.bgThumbActive]}>
-                          <Image source={IMG.rooms[k]} style={styles.bgThumb} />
-                          <Text style={styles.bgThumbLabel}>{k}</Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
-                </Animated.View>
-              </Animated.View>
-
-              <Animated.View style={[styles.menuCard, isMobile && styles.menuCardMobile, styles.glass, cardDelay(7)]}>
-                <Text style={styles.menuPanelTitle}>Overview</Text>
-                <View style={styles.menuStatGrid}>
-                  <View style={styles.menuStatBox}>
-                    <Text style={styles.menuStatLabel}>Best</Text>
-                    <Text style={styles.menuStatValue}>{best}</Text>
-                  </View>
-                  <View style={styles.menuStatBox}>
-                    <Text style={styles.menuStatLabel}>Selected</Text>
-                    <Text style={styles.menuStatValue}>{Object.values(selected).filter(Boolean).length}/{CHARACTERS_50.length}</Text>
-                  </View>
-                  <View style={styles.menuStatBox}>
-                    <Text style={styles.menuStatLabel}>Credits</Text>
-                    <Text style={styles.menuStatValue}>{credits}</Text>
-                  </View>
-                </View>
-                <View style={{ height: 8 }} />
-                <SoftButton
-                  title="LOGOUT"
-                  tone="danger"
-                  onPress={async () => {
-                    await AsyncStorage.removeItem(PROFILE_KEY);
-                    setProfileName("");
-                    setProfilePass("");
-                    setScreen("LOGIN");
-                  }}
-                />
-              </Animated.View>
+              ))}
+              <View style={{ height: 8 }} />
+              <SoftButton title="?NAPOI" onPress={() => setScreen("MENU")} />
             </View>
-          </View>
+            <View style={[styles.seedCard, shadow as any]}>
+              <Text style={styles.scoreSub}>Public Seeds</Text>
+              <View style={{ height: 8 }} />
+              <TextInput
+                value={seedSearch}
+                onChangeText={setSeedSearch}
+                placeholder="Search seeds..."
+                placeholderTextColor="rgba(220,220,230,0.45)"
+                style={styles.loginInput}
+                autoCapitalize="none"
+              />
+              <View style={{ height: 8 }} />
+              {publicSeeds
+                .filter((s) => {
+                  const q = seedSearch.trim().toLowerCase();
+                  if (!q) return true;
+                  return String(s.name).toLowerCase().includes(q) || String(s.username || "").toLowerCase().includes(q);
+                })
+                .map((s) => (
+                  <View key={s.id} style={styles.seedRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.seedName}>
+                        {s.name}{s.verified ? " [V]" : ""}
+                      </Text>
+                      <Text style={styles.seedMeta}>by {s.username} | {s.mode} | {s.difficulty}</Text>
+                    </View>
+                    <SoftButton
+                      title="LOAD"
+                      onPress={() => {
+                        const cfg = parseJson(s.config);
+                        if (cfg) applySettings(cfg);
+                        setCurrentSeed(String(s.seed));
+                        setScreen("MENU");
+                      }}
+                    />
+                  </View>
+                ))}
+            </View>
+          </ScrollView>
         </ImageBackground>
       </SafeAreaView>
+    );
+  }
+
+
+
+
+  if (screen === "SOCIAL") {
+    const isWide = SW > 1100;
+    const isMid = SW > 900;
+    return (
+      <>
+        <FeedScreen
+          profileSearch={profileSearch}
+          feedSearch={feedSearch}
+          postBody={postBody}
+          posts={posts}
+          socialLoading={socialLoading}
+          profileResults={profileResults}
+          commentsByPost={commentsByPost}
+          commentDrafts={commentDraft}
+          commentReplyTo={commentReplyTo}
+          authToken={authToken}
+          authUserId={authUser?.id}
+          authUsername={authUser?.username}
+          isWide={isWide}
+          isMid={isMid}
+          isAdmin={isAdminUser}
+          recents={recents}
+          onProfileSearchChange={setProfileSearch}
+          onFeedSearchChange={setFeedSearch}
+          onPostBodyChange={setPostBody}
+          onCreatePost={handleCreatePost}
+          onFollowToggle={handleFollowToggle}
+          onLikeToggle={handleLikeToggle}
+          onFavoriteToggle={handleFavoriteToggle}
+          onFetchComments={handleFetchComments}
+          onAddComment={handleAddComment}
+          onCommentDraftChange={(postId, value) => setCommentDraft((d) => ({ ...d, [postId]: value }))}
+          onSetCommentReplyTo={(postId, commentId) => setCommentReplyTo((r) => ({ ...r, [postId]: commentId }))}
+          onOpenProfile={openProfile}
+          onAddRecent={addRecent}
+          onRemoveRecent={removeRecent}
+          onOpenMessages={() => setScreen("MESSAGES")}
+          onOpenNotifications={() => setScreen("NOTIFS")}
+          onDeletePost={handleDeletePost}
+          onEditPost={handleEditPost}
+          onDeleteComment={handleDeleteComment}
+          onBack={() => setScreen("MENU")}
+          onNavHome={navHome}
+          onNavMessages={navMessages}
+          onNavExplore={navExplore}
+          onNavSettings={navSettings}
+        />
+        <HelpModal />
+      </>
+    );
+  }
+
+  if (screen === "PROFILE") {
+    return (
+      <>
+        <ProfileScreen
+          profileView={profileView}
+          profileFollowers={profileFollowers}
+          profileFollowing={profileFollowing}
+          profileStats={profileStats}
+          profileFeatured={profileFeatured}
+          profileIsFollowing={profileIsFollowing}
+          profileIsFriend={profileIsFriend}
+          profileLikedPosts={profileLikedPosts}
+          profileFavoritePosts={profileFavoritePosts}
+          profilePosts={profilePosts}
+          authUser={authUser}
+          authToken={authToken}
+          dmDraft={dmDraft}
+          dmMessages={dmMessages}
+          isAdmin={isAdminUser}
+          onBack={() => setScreen("MENU")}
+          onFollowToggle={handleProfileFollowToggle}
+          onRefreshProfile={handleRefreshProfile}
+          onLoadProfileMessages={handleLoadProfileMessages}
+          onDmDraftChange={setDmDraft}
+          onSendMessage={handleSendMessageToProfile}
+          onAdminAction={handleAdminAction}
+        />
+        <HelpModal />
+      </>
+    );
+  }
+
+  if (screen === "NOTIFS") {
+    return (
+      <>
+        <NotificationsScreen
+          items={notifications}
+          onMarkAll={async () => {
+            if (!authToken) return setScreen("LOGIN");
+            try {
+              await apiPost("notifications_mark", {});
+              const d = await apiGet("notifications_list");
+              setNotifications(d?.notifications ?? []);
+            } catch {}
+          }}
+          onBack={() => setScreen("MENU")}
+        />
+        <HelpModal />
+      </>
+    );
+  }
+
+  if (screen === "ACHIEVEMENTS") {
+    return (
+      <>
+        <AchievementsScreen
+          items={ACHIEVEMENTS}
+          achievements={achievements}
+          featured={featuredAchievements}
+          search={achievementSearch}
+          onSearchChange={setAchievementSearch}
+          onToggleFeatured={(id) =>
+            setFeaturedAchievements((arr) => {
+              if (arr.includes(id)) return arr.filter((x) => x !== id);
+              if (arr.length >= 5) return arr;
+              return [...arr, id];
+            })
+          }
+          onBack={() => setScreen("MENU")}
+        />
+        <HelpModal />
+      </>
+    );
+  }
+
+
+  if (screen === "MESSAGES") {
+    return (
+      <>
+        <MessagesScreen
+          profileResults={messageFriends}
+          messageUser={messageUser}
+          dmMessages={dmMessages}
+          dmDraft={dmDraft}
+          messageSearch={messageSearch}
+          authUsername={authUser?.username}
+          isAdmin={isAdminUser}
+          onAdminDeleteMessage={handleAdminDeleteMessage}
+          onAdminEditMessage={handleAdminEditMessage}
+          onMessageSearchChange={setMessageSearch}
+          onSelectMessageUser={openMessageUser}
+          onDmDraftChange={setDmDraft}
+          onSendMessage={handleSendMessageInChat}
+          onBack={() => setScreen("MENU")}
+        />
+        <HelpModal />
+      </>
+    );
+  }
+
+  if (screen === "MENU") {
+    return (
+      <>
+        <HomeScreen
+          profileName={profileName || "Guest"}
+          profileEmail={authUser?.email || "guest"}
+          profileAvatar={profileAvatar}
+          profileSearch={profileSearch}
+          profileResults={profileResults}
+          onProfileSearchChange={setProfileSearch}
+          onSearchUsers={async () => {
+            try {
+              const d = await apiGet(`profiles_search?q=${encodeURIComponent(profileSearch.trim())}`);
+              setProfileResults(d?.results ?? []);
+            } catch {}
+          }}
+          onOpenProfile={openProfile}
+          onGoAccount={() => (authToken ? setScreen("ACCOUNT") : setScreen("LOGIN"))}
+          onStart={startGame}
+          onSelect={() => setScreen("SELECT")}
+          onWorkshop={() => setScreen("WORKSHOP")}
+          onIntel={() => setScreen("INTEL")}
+          onScores={() => setScreen("SCORES")}
+          onStats={() => setScreen("STATS")}
+          onSeeds={() => setScreen("SEEDS")}
+          onSocial={() => setScreen("SOCIAL")}
+          onNotifs={() => (authToken ? setScreen("NOTIFS") : setScreen("LOGIN"))}
+          onAchievements={() => setScreen("ACHIEVEMENTS")}
+          onMessages={() => setScreen("MESSAGES")}
+        />
+        <HelpModal />
+      </>
     );
   }
 
@@ -3614,6 +4634,7 @@ if (screen === "SELECT") {
                 numColumns={6}
                 keyExtractor={(it) => it.id}
                 contentContainerStyle={{ padding: 10 }}
+                scrollEnabled
                 renderItem={({ item }) => {
                   const on = !!selected[item.id];
                   const glowOpacity = selectPulse.interpolate({ inputRange: [0, 1], outputRange: [0.25, 0.7] });
@@ -3639,14 +4660,43 @@ if (screen === "SELECT") {
                         </View>
                         <View style={styles.charTileFooter}>
                           <Text style={styles.charTileTxt}>{on ? `ON • L${lvl}` : `OFF • L${lvl}`}</Text>
-                      </View>
+                        </View>
                     </TouchableOpacity>
                   );
                 }}
               />
             </View>
 
-            <View style={[styles.selectSide, shadow as any]}>
+            <ScrollView style={[styles.selectSide, shadow as any]} contentContainerStyle={{ paddingBottom: 20 }}>
+              <Text style={styles.sideTitle}>SETTINGS</Text>
+              <SoftButton
+                title={`MODE: ${mode}`}
+                onPress={() => {
+                  const order = ["STORY", "CUSTOM", "ENDLESS", "CHALLENGE", "STEALTH", "RUSH"];
+                  const idx = order.indexOf(mode);
+                  setMode(order[(idx + 1) % order.length]);
+                }}
+              />
+              <SoftButton
+                title={`DIFFICULTY: ${DIFFICULTY_LABEL[difficultyPreset].toUpperCase()}`}
+                onPress={() => {
+                  const idx = DIFFICULTY_ORDER.indexOf(difficultyPreset);
+                  setDifficultyPreset(DIFFICULTY_ORDER[(idx + 1) % DIFFICULTY_ORDER.length]);
+                }}
+              />
+              <SoftButton
+                title={`PRESET: ${modePreset}`}
+                onPress={() => {
+                  const order = ["NORMAL", "OLD_TIMES", "BEST_LEADERS", "ARTISTS", "WRITERS", "MODERN", "SHADOWS"];
+                  const idx = order.indexOf(modePreset);
+                  setModePreset(order[(idx + 1) % order.length]);
+                }}
+              />
+              <SoftButton title={`TIER: ${modeTier}`} onPress={() => setModeTier((t) => (t % 3) + 1)} />
+              <SoftButton title={`DAILY: ${dailyRun ? "ON" : "OFF"}`} onPress={() => setDailyRun((v) => !v)} />
+              <SoftButton title={`NIGHT 6: ${night6 ? "ON" : "OFF"}`} onPress={() => setNight6((v) => !v)} />
+              <SoftButton title={`HARDCORE: ${hardcore ? "ON" : "OFF"}`} onPress={() => setHardcore((v) => !v)} />
+              <View style={{ height: 12 }} />
               <Text style={styles.sideTitle}>SET ALL</Text>
               <SoftButton
                 title="ALL ON"
@@ -3703,7 +4753,7 @@ if (screen === "SELECT") {
                 onPress={startGame}
               />
               <SoftButton title="?NAPOI" onPress={() => setScreen("MENU")} />
-            </View>
+            </ScrollView>
           </View>
         </ImageBackground>
       </SafeAreaView>
@@ -4382,7 +5432,7 @@ if (screen === "SELECT") {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#050509" },
   bg: { width: "100%", height: "100%" },
-  overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.62)" },
+  overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(4,6,10,0.88)" },
   vignette: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "transparent",
@@ -4411,26 +5461,26 @@ const styles = StyleSheet.create({
   menuTitleSub: { color: "rgba(220,220,230,0.75)", fontWeight: "800", marginTop: 2 },
   menuLeftActions: { width: 220, gap: 8 },
   glass: {
-    backgroundColor: "rgba(18,20,26,0.45)",
+    backgroundColor: "#0F1421",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.10)",
+    borderColor: "rgba(120,255,220,0.18)",
     borderRadius: 20,
   },
   menuBg: { width: "100%", height: "100%" },
-  menuBgOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(10,12,16,0.72)" },
-  menuBgGlow: { position: "absolute", left: -40, right: -40, top: -40, height: 240, backgroundColor: "rgba(94,252,232,0.08)" },
+  menuBgOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(7,10,16,0.9)" },
+  menuBgGlow: { position: "absolute", left: -40, right: -40, top: -40, height: 240, backgroundColor: "rgba(80,160,255,0.12)" },
   menuLayout: { flex: 1, flexDirection: "row", gap: 16, padding: 18 },
   menuSidebar: { width: 300, padding: 14, gap: 14 },
-  menuProfile: { flexDirection: "row", alignItems: "center", gap: 12, padding: 10, borderRadius: 16, backgroundColor: "rgba(255,255,255,0.04)" },
+  menuProfile: { flexDirection: "row", alignItems: "center", gap: 12, padding: 10, borderRadius: 16, backgroundColor: "#121827" },
   menuAvatar: { width: 44, height: 44, borderRadius: 14, backgroundColor: "rgba(94,252,232,0.25)" },
   menuProfileName: { color: "#F2F2F2", fontWeight: "900" },
   menuProfileSub: { color: "rgba(220,220,230,0.6)", fontSize: 12 },
   menuNav: { gap: 10 },
-  menuNavBtn: { padding: 12, borderRadius: 16, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", backgroundColor: "rgba(255,255,255,0.04)" },
-  menuNavBtnActive: { borderColor: "rgba(94,252,232,0.24)", backgroundColor: "rgba(94,252,232,0.08)" },
+  menuNavBtn: { padding: 12, borderRadius: 16, borderWidth: 1, borderColor: "rgba(120,255,220,0.14)", backgroundColor: "#0F1524" },
+  menuNavBtnActive: { borderColor: "rgba(120,255,220,0.35)", backgroundColor: "rgba(90,220,190,0.12)" },
   menuNavLeft: { flexDirection: "row", alignItems: "center", gap: 10 },
-  menuNavIcon: { width: 32, height: 32, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.06)" },
-  menuNavIconActive: { backgroundColor: "rgba(94,252,232,0.18)" },
+  menuNavIcon: { width: 32, height: 32, borderRadius: 10, backgroundColor: "#141A2A" },
+  menuNavIconActive: { backgroundColor: "rgba(120,255,220,0.2)" },
   menuNavTitle: { color: "#F2F2F2", fontWeight: "800" },
   menuNavSub: { color: "rgba(220,220,230,0.6)", fontSize: 12 },
   menuNavKbd: { position: "absolute", right: 12, top: 12, color: "rgba(220,220,230,0.4)" },
@@ -4443,7 +5493,7 @@ const styles = StyleSheet.create({
   menuBrandTitle: { color: "#F2F2F2", fontWeight: "900", fontSize: 18 },
   menuBrandSub: { color: "rgba(220,220,230,0.6)", fontSize: 12 },
   menuStatusRow: { flexDirection: "row", gap: 8, alignItems: "center" },
-  menuPill: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, borderWidth: 1, borderColor: "rgba(255,255,255,0.10)", backgroundColor: "rgba(255,255,255,0.04)" },
+  menuPill: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, borderWidth: 1, borderColor: "rgba(120,255,220,0.18)", backgroundColor: "#101826" },
   menuPillText: { color: "rgba(220,220,230,0.8)", fontSize: 12 },
   menuPillStrong: { color: "#F2F2F2", fontWeight: "900" },
   menuDot: { width: 8, height: 8, borderRadius: 8, backgroundColor: "#34d399" },
@@ -4460,16 +5510,16 @@ const styles = StyleSheet.create({
   menuPanelTitle: { color: "#F2F2F2", fontWeight: "800" },
   menuPanelHint: { color: "rgba(220,220,230,0.5)", fontSize: 12 },
   menuStatGrid: { flexDirection: "row", gap: 10 },
-  menuStatBox: { flex: 1, padding: 10, borderRadius: 14, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", backgroundColor: "rgba(255,255,255,0.04)" },
+  menuStatBox: { flex: 1, padding: 10, borderRadius: 14, borderWidth: 1, borderColor: "rgba(120,255,220,0.14)", backgroundColor: "#0F1524" },
   menuStatLabel: { color: "rgba(220,220,230,0.6)", fontSize: 12 },
   menuStatValue: { color: "#F2F2F2", fontWeight: "900", fontSize: 18, marginTop: 6 },
   menuChallengeRow: { flexDirection: "row", gap: 8, flexWrap: "wrap", marginTop: 6 },
   menuCard: {
     borderRadius: 28,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.10)",
+    borderColor: "rgba(120,255,220,0.16)",
     padding: 20,
-    backgroundColor: "rgba(10,10,18,0.78)",
+    backgroundColor: "#0F1421",
   },
   menuTag: { marginTop: 8, color: "rgba(220,220,235,0.7)" },
   menuStats: { flexDirection: "row", gap: 10, marginTop: 16 },
@@ -4478,9 +5528,9 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     paddingVertical: 10,
     paddingHorizontal: 12,
-    backgroundColor: "rgba(255,255,255,0.06)",
+    backgroundColor: "#0F1524",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.10)",
+    borderColor: "rgba(120,255,220,0.16)",
   },
   menuStatKey: { color: "rgba(220,220,230,0.75)", fontSize: 11, fontWeight: "800" },
   menuStatVal: { color: "#F1F1F1", fontSize: 16, fontWeight: "900", marginTop: 2 },
@@ -4507,9 +5557,9 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     paddingVertical: 10,
     paddingHorizontal: 12,
-    backgroundColor: "rgba(255,255,255,0.08)",
+    backgroundColor: "#101826",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.12)",
+    borderColor: "rgba(120,255,220,0.16)",
   },
   statKey: { color: "rgba(220,220,230,0.75)", fontSize: 12, fontWeight: "700" },
   statVal: { color: "#F1F1F1", fontSize: 18, fontWeight: "900", marginTop: 2 },
@@ -4519,9 +5569,9 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     paddingVertical: 10,
     paddingHorizontal: 10,
-    backgroundColor: "rgba(15,15,20,0.55)",
+    backgroundColor: "#0F1421",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.10)",
+    borderColor: "rgba(120,255,220,0.16)",
   },
   bgPickerTitle: { color: "rgba(230,230,240,0.72)", fontWeight: "800", marginBottom: 8 },
   bgThumbWrap: {
@@ -4529,8 +5579,8 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     overflow: "hidden",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.10)",
-    backgroundColor: "rgba(255,255,255,0.06)",
+    borderColor: "rgba(120,255,220,0.16)",
+    backgroundColor: "#121827",
   },
   bgThumbActive: { borderColor: "rgba(140,255,210,0.35)" },
   bgThumb: { width: "100%", height: 70 },
@@ -4542,16 +5592,16 @@ const styles = StyleSheet.create({
   loadingTitle: { color: "#F2F2F2", fontSize: 32, fontWeight: "900", letterSpacing: 1.2 },
   loadingSub: { color: "rgba(220,220,230,0.7)" },
 
-  loginBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(5,6,8,0.75)" },
+  loginBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(4,6,10,0.9)" },
   loginWrap: { flex: 1, padding: 24, justifyContent: "center", alignItems: "center" },
   loginCard: {
     width: "100%",
     maxWidth: 420,
     borderRadius: 24,
     padding: 18,
-    backgroundColor: "rgba(10,12,16,0.86)",
+    backgroundColor: "#0E121C",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.10)",
+    borderColor: "rgba(120,255,220,0.18)",
   },
   loginKicker: { color: "rgba(220,220,230,0.6)", letterSpacing: 3, textTransform: "uppercase", fontSize: 11 },
   loginTitle: { color: "#F2F2F2", fontSize: 30, fontWeight: "900", marginTop: 6 },
@@ -4560,22 +5610,119 @@ const styles = StyleSheet.create({
   loginInput: {
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.12)",
-    backgroundColor: "rgba(255,255,255,0.08)",
+    borderColor: "rgba(120,255,220,0.2)",
+    backgroundColor: "#131A2B",
     color: "#F2F2F2",
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 16,
   },
   loginHint: { color: "rgba(220,220,230,0.55)", fontSize: 12, marginTop: 10, marginBottom: 8 },
+  loginActionRow: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 6 },
+  loginActionBtn: { flex: 1 },
+  loginOr: { color: "rgba(220,220,230,0.55)", fontSize: 12, fontWeight: "800", letterSpacing: 1 },
+
+  seedWrap: { padding: 18, gap: 12 },
+  seedCard: {
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: "rgba(120,255,220,0.16)",
+    padding: 16,
+    backgroundColor: "#0F1421",
+  },
+  seedRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,0.06)",
+  },
+  seedName: { color: "#F2F2F2", fontWeight: "900" },
+  seedMetaRow: { flexDirection: "row", gap: 12, flexWrap: "wrap" },
+  seedMeta: { color: "rgba(220,220,230,0.7)", fontSize: 12 },
+
+  profileAvatar: { width: 72, height: 72, borderRadius: 18, alignSelf: "flex-start" },
+  profileAvatarPlaceholder: { width: 72, height: 72, borderRadius: 18, backgroundColor: "#141A2A" },
+  avatarGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 10 },
+  avatarTile: {
+    width: 46,
+    height: 46,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+    backgroundColor: "#0F1421",
+    overflow: "hidden",
+  },
+  avatarTileOn: { borderColor: "rgba(79,156,255,0.7)", shadowColor: "#4f9cff", shadowOpacity: 0.5, shadowRadius: 10 },
+  avatarTileImg: { width: "100%", height: "100%" },
+  profileList: { marginTop: 6, borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.06)" },
+  profileRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)" },
+  profileName: { color: "#F2F2F2", fontWeight: "900" },
+  profileNameLarge: { color: "#F2F2F2", fontWeight: "900", fontSize: 18, marginTop: 8 },
+  profileMeta: { color: "rgba(220,220,230,0.7)", fontSize: 12, marginTop: 2 },
+  profileStatsRow: { flexDirection: "row", gap: 12, flexWrap: "wrap", marginTop: 6 },
+
+  socialWrap: { padding: 18, gap: 12 },
+  socialCard: {
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: "rgba(120,255,220,0.16)",
+    padding: 16,
+    backgroundColor: "#0F1421",
+  },
+  socialHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 10 },
+  socialName: { color: "#F2F2F2", fontWeight: "900", fontSize: 16 },
+  socialBody: { color: "rgba(230,230,240,0.9)", marginTop: 6, lineHeight: 18 },
+  socialMeta: { color: "rgba(220,220,230,0.7)", marginTop: 6, fontSize: 12 },
+  socialActions: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 6 },
+  commentBox: { marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.06)" },
+  commentLine: { color: "rgba(220,220,230,0.75)", fontSize: 12, marginTop: 4 },
+
+  menuSimpleWrap: { padding: 20, gap: 12 },
+  menuSimpleCard: {
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: "rgba(120,255,220,0.16)",
+    padding: 16,
+    backgroundColor: "#0F1421",
+  },
+  menuProfileRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+  hubShell: { flex: 1, flexDirection: "row", gap: 12, padding: 16 },
+  hubSidebar: { width: 220, padding: 12, backgroundColor: "#0F1421", borderRadius: 18, borderWidth: 1, borderColor: "rgba(120,255,220,0.16)" },
+  hubMain: { flex: 1, gap: 12 },
+  hubRight: { width: 240, padding: 12, backgroundColor: "#0F1421", borderRadius: 18, borderWidth: 1, borderColor: "rgba(120,255,220,0.16)" },
+  hubTopbar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+  hubTitle: { color: "#F2F2F2", fontWeight: "900", fontSize: 20 },
+  hubSearch: { flex: 1, borderRadius: 999, backgroundColor: "#131A2B", color: "#F2F2F2", paddingHorizontal: 14, paddingVertical: 10 },
+  hubSearchAlt: { borderRadius: 16, backgroundColor: "#131A2B", color: "#F2F2F2", paddingHorizontal: 14, paddingVertical: 10 },
+  hubComposer: { borderRadius: 18, backgroundColor: "#0F1421", borderWidth: 1, borderColor: "rgba(120,255,220,0.16)", padding: 12, gap: 8 },
+  hubComposerInput: { minHeight: 60, color: "#F2F2F2", backgroundColor: "#131A2B", borderRadius: 14, padding: 10 },
+  hubFeed: { paddingVertical: 8, gap: 12 },
+  hubCard: { backgroundColor: "#0F1421", borderRadius: 18, borderWidth: 1, borderColor: "rgba(120,255,220,0.16)", padding: 12, gap: 6 },
+  hubCardHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  hubCardTitle: { color: "#F2F2F2", fontWeight: "900" },
+  hubCardBody: { color: "rgba(230,230,240,0.9)" },
+  hubCardMeta: { color: "rgba(220,220,230,0.7)", fontSize: 12 },
+  hubNavItem: { paddingVertical: 8 },
+  hubNavText: { color: "#E8E8F0" },
+  hubBody: { flex: 1, flexDirection: "row", gap: 12 },
+  hubContent: { flex: 1, backgroundColor: "#0F1421", borderRadius: 18, borderWidth: 1, borderColor: "rgba(120,255,220,0.16)" },
+
+  loginShell: { flex: 1, flexDirection: "row", padding: 24, gap: 16 },
+  loginHero: { flex: 1.2, borderRadius: 24, backgroundColor: "rgba(37,140,244,0.12)", padding: 24, justifyContent: "center" },
+  loginHeroTitle: { color: "#EAF2FF", fontSize: 32, fontWeight: "900" },
+  loginHeroSub: { color: "rgba(220,230,255,0.7)", marginTop: 8 },
+  loginHeroCard: { height: 200, borderRadius: 18, backgroundColor: "rgba(15,20,33,0.5)", marginTop: 16 },
+  loginPanel: { flex: 1, borderRadius: 24, backgroundColor: "#0E121C", borderWidth: 1, borderColor: "rgba(120,255,220,0.18)", padding: 18 },
 
   scoreWrap: { flex: 1, padding: 18, justifyContent: "center" },
   scoreCard: {
     borderRadius: 24,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.10)",
+    borderColor: "rgba(120,255,220,0.16)",
     padding: 16,
-    backgroundColor: "rgba(12,12,18,0.82)",
+    backgroundColor: "#0F1421",
   },
   scoreTitle: { fontSize: 26, fontWeight: "900", color: "#F2F2F2" },
   scoreSub: { color: "rgba(220,220,230,0.7)", marginTop: 2 },
@@ -4598,9 +5745,9 @@ const styles = StyleSheet.create({
   statsCard: {
     borderRadius: 24,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.10)",
+    borderColor: "rgba(120,255,220,0.16)",
     padding: 16,
-    backgroundColor: "rgba(12,12,18,0.82)",
+    backgroundColor: "#0F1421",
   },
   statsRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 6 },
   statsLabel: { color: "rgba(220,220,230,0.7)", fontWeight: "700" },
@@ -4633,33 +5780,33 @@ const styles = StyleSheet.create({
   shopDesc: { color: "rgba(220,220,230,0.7)", fontSize: 12, marginTop: 2 },
   shopMeta: { color: "rgba(255,200,120,0.8)", fontSize: 12, marginTop: 4, fontWeight: "800" },
   shopSlots: { flexDirection: "row", gap: 10, marginTop: 8 },
-  shopSlot: { flex: 1, padding: 10, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.05)", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
+  shopSlot: { flex: 1, padding: 10, borderRadius: 12, backgroundColor: "#101826", borderWidth: 1, borderColor: "rgba(120,255,220,0.14)" },
   shopSlotVal: { color: "#F2F2F2", fontWeight: "900", marginTop: 6 },
   workshopHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 },
   workshopBadge: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, borderWidth: 1, borderColor: "rgba(120,255,190,0.35)", backgroundColor: "rgba(90,255,180,0.08)" },
   workshopBadgeTxt: { color: "rgba(210,255,230,0.9)", fontWeight: "900", fontSize: 11, letterSpacing: 1 },
   workshopGrid: { flexDirection: "row", gap: 12, flexWrap: "wrap" },
   workshopCard: { flex: 1, minWidth: 260, padding: 14, borderRadius: 18 },
-  workshopBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(8,10,18,0.85)" },
+  workshopBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(6,8,14,0.94)" },
   workshopScroll: { paddingBottom: 32 },
   workshopWrap: { flex: 1, padding: 20, gap: 16 },
   workshopHero: {
     padding: 18,
     borderRadius: 26,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.10)",
-    backgroundColor: "rgba(20,18,36,0.85)",
+    borderColor: "rgba(120,255,220,0.18)",
+    backgroundColor: "#141B2D",
   },
   workshopKicker: { color: "rgba(220,220,235,0.7)", letterSpacing: 4, fontSize: 12 },
   workshopTitle: { color: "#F2F2F2", fontSize: 30, fontWeight: "900", marginTop: 6 },
   workshopDesc: { color: "rgba(220,220,230,0.7)", marginTop: 6, lineHeight: 18 },
   workshopMetaRow: { flexDirection: "row", gap: 10, marginTop: 12 },
-  workshopMetaPill: { borderRadius: 14, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.10)" },
+  workshopMetaPill: { borderRadius: 14, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: "#101826", borderWidth: 1, borderColor: "rgba(120,255,220,0.16)" },
   workshopMetaTxt: { color: "rgba(220,220,230,0.7)", fontSize: 11, fontWeight: "800" },
   workshopMetaVal: { color: "#F2F2F2", fontWeight: "900", marginTop: 2 },
   workshopHeroActions: { marginTop: 12, alignItems: "flex-start" },
   workshopMain: { flex: 1, gap: 14 },
-  workshopSection: { padding: 14, borderRadius: 22, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", backgroundColor: "rgba(12,12,20,0.8)" },
+  workshopSection: { padding: 14, borderRadius: 22, borderWidth: 1, borderColor: "rgba(120,255,220,0.14)", backgroundColor: "#0F1421" },
   sectionTitle: { color: "#F2F2F2", fontWeight: "900", marginBottom: 10 },
   cardGrid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
   itemCard: {
@@ -4668,7 +5815,8 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     padding: 12,
     borderWidth: 1,
-    backgroundColor: "rgba(16,16,26,0.85)",
+    borderColor: "rgba(120,255,220,0.16)",
+    backgroundColor: "#101626",
     shadowOpacity: 0.45,
     shadowRadius: 16,
   },
@@ -4705,17 +5853,17 @@ const styles = StyleSheet.create({
   selectGridCard: {
     flex: 1,
     borderRadius: 18,
-    backgroundColor: "rgba(12,12,16,0.85)",
+    backgroundColor: "#0F1421",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
+    borderColor: "rgba(120,255,220,0.16)",
   },
   selectSide: {
     width: 200,
     borderRadius: 18,
     padding: 12,
-    backgroundColor: "rgba(12,12,16,0.85)",
+    backgroundColor: "#0F1421",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
+    borderColor: "rgba(120,255,220,0.16)",
   },
   sideTitle: { color: "rgba(230,230,240,0.8)", fontWeight: "900", marginBottom: 6 },
   sideMeta: { color: "rgba(220,220,230,0.7)", marginTop: 4 },
@@ -4723,9 +5871,9 @@ const styles = StyleSheet.create({
     marginTop: 6,
     padding: 10,
     borderRadius: 12,
-    backgroundColor: "rgba(0,0,0,0.45)",
+    backgroundColor: "#0B0F1A",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.06)",
+    borderColor: "rgba(120,255,220,0.14)",
   },
   infoName: { color: "#F2F2F2", fontWeight: "900", fontSize: 14 },
   infoMeta: { color: "rgba(220,220,230,0.7)", marginTop: 4, fontSize: 12 },
@@ -4854,7 +6002,7 @@ const styles = StyleSheet.create({
   damageVal: { color: "#FFD3D3", fontWeight: "900", marginTop: 2 },
 
   staticOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(255,255,255,0.18)" },
-  overlayStrong: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.72)" },
+  overlayStrong: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(4,6,10,0.92)" },
   glitchOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "rgba(255,255,255,0.22)",
@@ -5177,3 +6325,4 @@ const styles = StyleSheet.create({
   recapLine: { color: "rgba(230,230,240,0.8)", fontSize: 12, marginTop: 2 },
   jumpSmall: { marginTop: 6, color: "rgba(235,235,245,0.72)" },
 });
+
