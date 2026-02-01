@@ -680,10 +680,11 @@ const challengeMultiplier = (c: any) => {
 };
 
 const { width: SW, height: SH } = Dimensions.get("window");
-const uiCompact = SW < 1200 || SH < 900;
-const ultraCompact = SW < 560 || SH < 740;
-const microCompact = SW < 420 || SH < 680;
+const uiCompact = SW < 1100 || SH < 860;
+const ultraCompact = SW < 520 || SH < 720;
+const microCompact = SW < 360 || SH < 640;
 const dockCols = microCompact ? 1 : SW < 520 || SH < 700 ? 2 : SW < 900 ? 3 : 4;
+const gameScale = Math.min(1, Math.max(0.75, Math.min(SW / 900, SH / 700)));
 
 // 2D -> 3D effect
 const depthToScale = (depth: number) => 0.35 + depth * 0.95; // 0.35..1.3
@@ -6604,10 +6605,10 @@ export default function App() {
   if (screen === "SELECT") {
     const selectedCount = selectedList.length;
     const info = CHARACTERS_50.find((c) => c.id === selectedInfoId) ?? CHARACTERS_50[0];
-    const selectCompact = SW < 1400 || SH < 820;
-    const selectTopStack = SW < 900 || SH < 720;
-    const selectCols = SW < 420 ? 2 : SW < 620 ? 3 : SW < 900 ? 4 : SW < 1300 ? 6 : 10;
-    const showTileMeta = SW >= 1400;
+    const selectCompact = SW < 1100 || SH < 800;
+    const selectTopStack = SW < 860 || SH < 720;
+    const selectCols = SW < 360 ? 2 : SW < 520 ? 3 : SW < 780 ? 4 : SW < 1100 ? 5 : SW < 1400 ? 7 : 10;
+    const showTileMeta = SW >= 1500;
     const bonusPct = Math.max(0, Math.round((challengeMultiplier(challenge) - 1) * 100));
     const selectTitleSize = SW < 520 || SH < 700 ? 24 : SW < 900 ? 32 : 44;
     const selectSubSize = SW < 520 || SH < 700 ? 12 : SW < 900 ? 15 : 18;
@@ -6639,7 +6640,7 @@ export default function App() {
             </View>
 
             <View style={[styles.selectLayoutNew, selectCompact && styles.selectLayoutStack]}>
-              <View style={[styles.selectPanel, styles.selectGridPanel, shadow as any, selectCompact && { maxHeight: Math.max(240, Math.floor(SH * 0.48)) }]}>
+              <View style={[styles.selectPanel, styles.selectGridPanel, shadow as any, selectCompact && { maxHeight: Math.max(220, Math.floor(SH * 0.55)) }]}>
                 <View style={styles.panelHeader}>
                   <Text style={styles.panelTitle}>Animatronics</Text>
                   <Text style={styles.panelMeta}>Tap pentru ON/OFF ? L1?L20</Text>
@@ -6806,7 +6807,7 @@ export default function App() {
 // PLAY screen
   const view = cameraOpen ? camView : VIEWS[0];
   const dockCompact = SW < 1100 || SH < 900;
-  const dockMax = Math.max(110, Math.min(260, Math.floor(SH * (ultraCompact ? 0.22 : dockCompact ? 0.3 : 0.28))));
+  const dockMax = Math.max(90, Math.min(240, Math.floor(SH * (ultraCompact ? 0.2 : dockCompact ? 0.26 : 0.28))));
   const compactHud = uiCompact || SH < 900;
   const tightHud = ultraCompact || SH < 760;
   const officeBg = IMG.rooms[bgPick];
@@ -6884,14 +6885,14 @@ export default function App() {
               onPressIn={() => setLookDir(-1)}
               onPressOut={() => setLookDir(0)}
             >
-              <Text style={styles.lookZoneTxt}>◀</Text>
+              <Text style={[styles.lookZoneTxt, ultraCompact && styles.lookZoneTxtSmall]}>◀</Text>
             </Pressable>
             <Pressable
               style={styles.lookZoneRight}
               onPressIn={() => setLookDir(1)}
               onPressOut={() => setLookDir(0)}
             >
-              <Text style={styles.lookZoneTxt}>▶</Text>
+              <Text style={[styles.lookZoneTxt, ultraCompact && styles.lookZoneTxtSmall]}>▶</Text>
             </Pressable>
           </View>
         )}
@@ -6908,7 +6909,14 @@ export default function App() {
         )}
 
         {/* HUD */}
-        <View style={[styles.hud, compactHud && styles.hudCompact, ultraCompact && styles.hudUltra, { marginBottom: dockMax + 16 }]}>
+        <View
+          style={[
+            styles.hud,
+            compactHud && styles.hudCompact,
+            ultraCompact && styles.hudUltra,
+            { marginBottom: dockMax + 16, transform: [{ scale: gameScale }], alignSelf: "center" },
+          ]}
+        >
           <View style={[styles.hudTop, compactHud && styles.hudTopWrap]}>
             <View style={[styles.hudPill, compactHud && styles.hudPillCompact, ultraCompact && styles.hudPillUltra]}>
               <Text style={[styles.hudKey, compactHud && styles.hudKeyCompact, ultraCompact && styles.hudKeyUltra]}>Night</Text>
@@ -7145,7 +7153,7 @@ export default function App() {
         )}
 
         {/* DOCK */}
-        <View style={[styles.dock, dockCompact && styles.dockCompact]}>
+        <View style={[styles.dock, dockCompact && styles.dockCompact, { transform: [{ scale: gameScale }], alignSelf: "center" }]}>
           <ScrollView
             style={[styles.dockScroll, { maxHeight: dockMax }]}
             contentContainerStyle={[styles.dockScrollContent, dockCompact && { gap: 6 }]}
@@ -8306,6 +8314,7 @@ const styles = StyleSheet.create({
     paddingRight: 12,
   },
   lookZoneTxt: { color: "rgba(230,230,240,0.45)", fontSize: 26, fontWeight: "900" },
+  lookZoneTxtSmall: { fontSize: 18 },
 
   powerOutOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.88)", alignItems: "center", justifyContent: "center" },
   powerOutLight: { width: 120, height: 120, borderRadius: 80, backgroundColor: "rgba(255,255,220,0.08)" },
