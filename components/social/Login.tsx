@@ -7,6 +7,7 @@ import {
   TextInput,
   Pressable,
   useWindowDimensions,
+  ScrollView,
 } from "react-native";
 import { MaterialIcons } from "@expo/vector-icons";
 
@@ -55,7 +56,8 @@ export default function LoginScreen({
 
   return (
     <SafeAreaView style={styles.safe}>
-      <View style={containerStyle}>
+      <ScrollView contentContainerStyle={[styles.scrollContent, { minHeight: height }]} showsVerticalScrollIndicator={false}>
+        <View style={containerStyle}>
         {wide ? (
           <View style={styles.left}>
             <View style={styles.leftInner}>
@@ -151,13 +153,15 @@ export default function LoginScreen({
             </Pressable>
           </View>
         </View>
-      </View>
+        </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: BG_DARK },
+  scrollContent: { flexGrow: 1 },
   container: { flex: 1, flexDirection: "row", backgroundColor: BG_DARK },
 
   left: {

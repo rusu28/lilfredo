@@ -11,7 +11,7 @@ import {
   View,
 } from "react-native";
 import { MaterialIcons } from "@expo/vector-icons";
-import type { SocialFeedProps, SocialPost, SocialRecentItem } from "./types";
+import type { SocialFeedProps, SocialPoll, SocialPost, SocialRecentItem } from "./types";
 import { resolveAvatarSource } from "./avatar-source";
 
 const PRIMARY = "#4f9cff";
@@ -35,10 +35,43 @@ const Avatar = ({ uri, size = 44 }: { uri?: string; size?: number }) => (
   </View>
 );
 
+const BadgeInline = ({
+  ids,
+  meta,
+  size = 14,
+}: {
+  ids?: string[];
+  meta?: Record<string, { id: string; name: string; type: "emoji" | "image" | "icon"; value: string }>;
+  size?: number;
+}) => {
+  if (!ids?.length || !meta) return null;
+  return (
+    <View style={styles.badgeInlineRow}>
+      {ids.map((id) => {
+        const b = meta[id];
+        if (!b) return null;
+        if (b.type === "emoji") {
+          return (
+            <Text key={id} style={[styles.badgeEmoji, { fontSize: size }]}>
+              {b.value}
+            </Text>
+          );
+        }
+        if (b.type === "icon") {
+          return <MaterialIcons key={id} name={b.value as any} size={size} color="#e7edf5" />;
+        }
+        return <Image key={id} source={b.value as any} style={{ width: size, height: size, borderRadius: 4 }} />;
+      })}
+    </View>
+  );
+};
+
 const TopBar = ({
   name,
   handle,
   avatar,
+  badges,
+  badgeMeta,
   onOpenMessages,
   onOpenNotifications,
   onOpenProfile,
@@ -47,6 +80,8 @@ const TopBar = ({
   name: string;
   handle: string;
   avatar?: string;
+  badges?: string[];
+  badgeMeta?: Record<string, { id: string; name: string; type: "emoji" | "image" | "icon"; value: string }>;
   onOpenMessages?: () => void;
   onOpenNotifications?: () => void;
   onOpenProfile?: () => void;
@@ -77,9 +112,12 @@ const TopBar = ({
 
       <Pressable style={styles.meRow} onPress={onOpenProfile} hitSlop={6}>
         <View style={{ alignItems: "flex-end" }}>
-          <Text style={styles.meName} numberOfLines={1}>
-            {name}
-          </Text>
+          <View style={styles.nameInlineRow}>
+            <Text style={styles.meName} numberOfLines={1}>
+              {name}
+            </Text>
+            <BadgeInline ids={badges} meta={badgeMeta} size={12} />
+          </View>
           <Text style={styles.meHandle} numberOfLines={1}>
             {handle}
           </Text>
@@ -148,12 +186,14 @@ const Composer = ({
   value,
   onChange,
   onPost,
+  onOpenPoll,
   avatar,
   name,
 }: {
   value: string;
   onChange: (v: string) => void;
   onPost: () => void;
+  onOpenPoll: () => void;
   avatar?: string;
   name?: string;
 }) => (
@@ -172,7 +212,12 @@ const Composer = ({
         <View style={styles.composerBottom}>
           <View style={styles.composerIcons}>
             {["image", "sentiment-satisfied", "location-on", "poll"].map((n) => (
-              <Pressable key={n} style={styles.smallBtn} hitSlop={8}>
+              <Pressable
+                key={n}
+                style={styles.smallBtn}
+                hitSlop={8}
+                onPress={n === "poll" ? onOpenPoll : undefined}
+              >
                 <MaterialIcons name={n as any} size={20} color={MUTED} />
               </Pressable>
             ))}
@@ -210,6 +255,7 @@ const FeedHeader = ({
 
 const PostCard = ({
   post,
+  badgeMeta,
   onToggleLike,
   onToggleFavorite,
   onComment,
@@ -227,12 +273,13 @@ const PostCard = ({
   onEditPost,
 }: {
   post: SocialPost;
+  badgeMeta?: Record<string, { id: string; name: string; type: "emoji" | "image" | "icon"; value: string }>;
   onToggleLike: (id: string) => void;
   onToggleFavorite: (id: string) => void;
   onComment: (id: string) => void;
   onOpenProfile: (username: string) => void;
   onAddRecent: (item: SocialRecentItem) => void;
-  comments?: { id: string; username: string; body: string }[];
+  comments?: { id: string; username: string; body: string; badges?: string[] }[];
   isAdmin: boolean;
   onDeleteComment: (postId: string, commentId: string) => void;
   commentDraft: string;
@@ -260,7 +307,10 @@ const PostCard = ({
           <Avatar uri={(post as any).avatar_url || (post as any).avatar} size={44} />
           <View style={{ flex: 1 }}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-              <Text style={styles.postAuthor}>{post.username}</Text>
+              <View style={styles.nameInlineRow}>
+                <Text style={styles.postAuthor}>{post.username}</Text>
+                <BadgeInline ids={post.badges} meta={badgeMeta} size={12} />
+              </View>
               {post.verified ? (
                 <View style={styles.verifiedBadge}>
                   <MaterialIcons name="check" size={12} color="#fff" />
@@ -388,7 +438,10 @@ const PostCard = ({
           {comments.map((c: any) => (
             <View key={c.id} style={[styles.commentRow, c.parent_id && styles.commentRowReply]}>
               <View style={{ flex: 1 }}>
-                <Text style={styles.commentAuthor}>{c.username}</Text>
+                <View style={styles.nameInlineRow}>
+                  <Text style={styles.commentAuthor}>{c.username}</Text>
+                  <BadgeInline ids={c.badges} meta={badgeMeta} size={10} />
+                </View>
                 <Text style={styles.commentBody}>{c.body}</Text>
                 <Pressable onPress={() => onSetReplyTo(c.id)} hitSlop={8}>
                   <Text style={styles.replyText}>Reply</Text>
@@ -436,13 +489,20 @@ type Row =
   | { type: "recents"; id: "recents" }
   | { type: "composer"; id: "composer" }
   | { type: "header"; id: "header" }
+  | { type: "poll"; id: string; poll: SocialPoll }
   | { type: "post"; id: string; post: SocialPost };
 
 export default function FeedScreen({
   posts,
+  polls,
   postBody,
   onPostBodyChange,
   onCreatePost,
+  onCreatePoll,
+  onVotePoll,
+  onDeletePoll,
+  isAdmin,
+  badgeMeta,
   onLikeToggle,
   onFavoriteToggle,
   onFetchComments,
@@ -457,7 +517,7 @@ export default function FeedScreen({
   onRemoveRecent,
   authUserId,
   authUsername,
-  isAdmin,
+  authBadges,
   commentsByPost,
   commentDrafts,
   commentReplyTo,
@@ -469,7 +529,13 @@ export default function FeedScreen({
   onEditPost,
 }: SocialFeedProps) {
   const [tab, setTab] = useState<"all" | "following" | "popular">("all");
+  const [pollOpen, setPollOpen] = useState(false);
+  const [pollQuestion, setPollQuestion] = useState("");
+  const [pollOptions, setPollOptions] = useState(["", ""]);
+  const [pollType, setPollType] = useState<"single" | "multi" | "quiz">("single");
+  const [pollCorrect, setPollCorrect] = useState(0);
   const safePosts = Array.isArray(posts) ? posts : [];
+  const safePolls = Array.isArray(polls) ? polls : [];
   const search = (feedSearch || "").trim().toLowerCase();
   const filteredPosts = search
     ? safePosts.filter(
@@ -482,6 +548,7 @@ export default function FeedScreen({
   const meName = (authUsername || mePost?.username || "").trim() || "Player";
   const meHandle = `@${meName.toLowerCase().replace(/\s+/g, "")}`;
   const meAvatar = (mePost as any)?.avatar_url || (mePost as any)?.avatar;
+  const meBadges = authBadges || (mePost as any)?.badges;
 
   const rows: Row[] = useMemo(() => {
     return [
@@ -490,9 +557,10 @@ export default function FeedScreen({
       { type: "recents", id: "recents" },
       { type: "composer", id: "composer" },
       { type: "header", id: "header" },
+      ...safePolls.map((poll) => ({ type: "poll", id: `poll-${poll.id}`, poll })),
       ...filteredPosts.map((post) => ({ type: "post", id: post.id, post })),
     ];
-  }, [filteredPosts]);
+  }, [filteredPosts, safePolls]);
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -510,6 +578,8 @@ export default function FeedScreen({
                   name={meName}
                   handle={meHandle}
                   avatar={meAvatar}
+                  badges={meBadges}
+                  badgeMeta={badgeMeta}
                   onOpenMessages={onOpenMessages}
                   onOpenNotifications={onOpenNotifications}
                   onOpenProfile={() => onOpenProfile(meName)}
@@ -530,20 +600,117 @@ export default function FeedScreen({
               );
             case "composer":
               return (
-                <Composer
-                  value={postBody}
-                  onChange={onPostBodyChange}
-                  onPost={onCreatePost}
-                  avatar={meAvatar}
-                  name={meName}
-                />
+                <View style={{ gap: 12 }}>
+                  <Composer
+                    value={postBody}
+                    onChange={onPostBodyChange}
+                    onPost={onCreatePost}
+                    onOpenPoll={() => setPollOpen(true)}
+                    avatar={meAvatar}
+                    name={meName}
+                  />
+                  {pollOpen ? (
+                    <View style={styles.pollCard}>
+                      <Text style={styles.pollTitle}>Create Poll</Text>
+                      <TextInput
+                        value={pollQuestion}
+                        onChangeText={setPollQuestion}
+                        placeholder="Question"
+                        placeholderTextColor={MUTED2}
+                        style={styles.pollInput}
+                      />
+                      {pollOptions.map((opt, idx) => (
+                        <TextInput
+                          key={`poll-opt-${idx}`}
+                          value={opt}
+                          onChangeText={(v) =>
+                            setPollOptions((p) => p.map((x, i) => (i === idx ? v : x)))
+                          }
+                          placeholder={`Option ${idx + 1}`}
+                          placeholderTextColor={MUTED2}
+                          style={styles.pollInput}
+                        />
+                      ))}
+                      <View style={styles.pollActions}>
+                        <Pressable
+                          style={styles.pollGhost}
+                          onPress={() => {
+                            if (pollOptions.length >= 4) return;
+                            setPollOptions((p) => [...p, ""]);
+                          }}
+                        >
+                          <Text style={styles.pollGhostText}>Add option</Text>
+                        </Pressable>
+                        <View style={{ flex: 1 }} />
+                        <Pressable
+                          style={styles.pollGhost}
+                          onPress={() => {
+                            setPollOpen(false);
+                            setPollQuestion("");
+                            setPollOptions(["", ""]);
+                          }}
+                        >
+                          <Text style={styles.pollGhostText}>Cancel</Text>
+                        </Pressable>
+                        <Pressable
+                          style={[styles.pollPrimary, !pollQuestion.trim() && { opacity: 0.6 }]}
+                          onPress={() => {
+                            const q = pollQuestion.trim();
+                            const opts = pollOptions.map((o) => o.trim()).filter(Boolean);
+                            if (!q || opts.length < 2) return;
+                            onCreatePoll(q, opts, pollType, pollType === "quiz" ? pollCorrect : null);
+                            setPollOpen(false);
+                            setPollQuestion("");
+                            setPollOptions(["", ""]);
+                            setPollType("single");
+                            setPollCorrect(0);
+                          }}
+                        >
+                          <Text style={styles.pollPrimaryText}>Create</Text>
+                        </Pressable>
+                      </View>
+                      <View style={styles.pollTypeRow}>
+                        {(["single", "multi", "quiz"] as const).map((t) => (
+                          <Pressable
+                            key={t}
+                            onPress={() => setPollType(t)}
+                            style={[styles.pollTypePill, pollType === t && styles.pollTypePillActive]}
+                          >
+                            <Text style={[styles.pollTypeText, pollType === t && styles.pollTypeTextActive]}>
+                              {t.toUpperCase()}
+                            </Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                      {pollType === "quiz" ? (
+                        <View style={styles.pollCorrectRow}>
+                          <Text style={styles.pollMeta}>Correct option:</Text>
+                          {pollOptions.map((_, idx) => (
+                            <Pressable
+                              key={`correct-${idx}`}
+                              onPress={() => setPollCorrect(idx)}
+                              style={[styles.pollTypePill, pollCorrect === idx && styles.pollTypePillActive]}
+                            >
+                              <Text style={[styles.pollTypeText, pollCorrect === idx && styles.pollTypeTextActive]}>
+                                {idx + 1}
+                              </Text>
+                            </Pressable>
+                          ))}
+                        </View>
+                      ) : null}
+                    </View>
+                  ) : null}
+                </View>
               );
             case "header":
               return <FeedHeader tab={tab} setTab={setTab} />;
+            case "poll":
+              return <PollCard poll={item.poll} onVote={onVotePoll} isAdmin={isAdmin} onDelete={onDeletePoll} badgeMeta={badgeMeta} />;
             case "post":
               return (
                 <PostCard
                   post={item.post}
+                  badgeMeta={badgeMeta}
                   onToggleLike={onLikeToggle}
                   onToggleFavorite={onFavoriteToggle}
                   onComment={onFetchComments}
@@ -569,6 +736,69 @@ export default function FeedScreen({
     </SafeAreaView>
   );
 }
+
+const PollCard = ({
+  poll,
+  onVote,
+  isAdmin,
+  onDelete,
+  badgeMeta,
+}: {
+  poll: SocialPoll;
+  onVote: (pollId: string, optionIndex: number) => void;
+  isAdmin: boolean;
+  onDelete?: (pollId: string) => void;
+  badgeMeta?: Record<string, { id: string; name: string; type: "emoji" | "image" | "icon"; value: string }>;
+}) => {
+  const counts = Array.isArray(poll.counts) ? poll.counts : Array(poll.options?.length || 0).fill(0);
+  const total = counts.reduce((a, b) => a + (Number(b) || 0), 0);
+  const closed = poll.closes_at ? new Date(poll.closes_at).getTime() < Date.now() : false;
+  const typeLabel = poll.poll_type === "quiz" ? "QUIZ" : poll.allow_multiple ? "MULTI" : "SINGLE";
+  return (
+    <View style={styles.pollCard}>
+      <View style={styles.pollHeader}>
+        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+          <Text style={styles.pollTitle}>{poll.question}</Text>
+          {isAdmin ? (
+            <Pressable onPress={() => onDelete?.(poll.id)} hitSlop={8}>
+              <MaterialIcons name="delete" size={18} color="#ff7a7a" />
+            </Pressable>
+          ) : null}
+        </View>
+        <View style={styles.pollMetaRow}>
+          <Text style={styles.pollMeta}>
+            {poll.username ? `@${poll.username}` : "poll"} ? {typeLabel} ? {closed ? "closed" : "open"}
+          </Text>
+          <BadgeInline ids={poll.badges} meta={badgeMeta} size={12} />
+        </View>
+      </View>
+      <View style={{ gap: 8 }}>
+        {(poll.options || []).map((opt, idx) => {
+          const c = Number(counts[idx]) || 0;
+          const pct = total > 0 ? Math.round((c / total) * 100) : 0;
+          const isCorrect = poll.poll_type === "quiz" && poll.correct_index === idx;
+          return (
+            <Pressable
+              key={`${poll.id}-${idx}`}
+              style={styles.pollOption}
+              onPress={() => {
+                if (closed) return;
+                onVote(poll.id, idx);
+              }}
+            >
+              <View style={[styles.pollOptionFill, { width: `${pct}%`, backgroundColor: isCorrect ? "rgba(90,255,180,0.25)" : "rgba(79,156,255,0.25)" }]} />
+              <View style={styles.pollOptionRow}>
+                <Text style={styles.pollOptionText}>{opt}</Text>
+                <Text style={styles.pollOptionPct}>{pct}%</Text>
+              </View>
+            </Pressable>
+          );
+        })}
+      </View>
+      <Text style={styles.pollFooter}>Total votes: {total}</Text>
+    </View>
+  );
+};
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: BG },
@@ -634,6 +864,9 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: PRIMARY,
   },
+  nameInlineRow: { flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" },
+  badgeInlineRow: { flexDirection: "row", alignItems: "center", gap: 4 },
+  badgeEmoji: { color: TEXT },
   avatarWrap: {
     alignItems: "center",
     justifyContent: "center",
@@ -727,6 +960,81 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   postBtnText: { color: "#fff", fontWeight: "900" },
+  pollCard: {
+    backgroundColor: CARD,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: BORDER,
+    padding: 14,
+  },
+  pollHeader: { marginBottom: 8 },
+  pollTitle: { color: TEXT, fontWeight: "900", marginBottom: 10 },
+  pollMetaRow: { flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: -4 },
+  pollMeta: { color: MUTED2, fontSize: 12 },
+  pollTypeRow: { flexDirection: "row", gap: 8, marginTop: 8, flexWrap: "wrap" },
+  pollTypePill: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: BORDER,
+    backgroundColor: "rgba(255,255,255,0.03)",
+  },
+  pollTypePillActive: { borderColor: PRIMARY, backgroundColor: "rgba(79,156,255,0.18)" },
+  pollTypeText: { color: MUTED, fontWeight: "700", fontSize: 11 },
+  pollTypeTextActive: { color: TEXT, fontWeight: "900" },
+  pollCorrectRow: { flexDirection: "row", gap: 6, alignItems: "center", marginTop: 6, flexWrap: "wrap" },
+  pollOption: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: BORDER,
+    backgroundColor: SURFACE,
+    overflow: "hidden",
+  },
+  pollOptionFill: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    bottom: 0,
+    backgroundColor: "rgba(79,156,255,0.25)",
+  },
+  pollOptionRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  pollOptionText: { color: TEXT, fontWeight: "700" },
+  pollOptionPct: { color: MUTED, fontWeight: "800" },
+  pollFooter: { marginTop: 8, color: MUTED2, fontSize: 12 },
+  pollInput: {
+    height: 40,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: BORDER,
+    backgroundColor: SURFACE,
+    paddingHorizontal: 12,
+    color: TEXT,
+    marginBottom: 8,
+  },
+  pollActions: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 6 },
+  pollGhost: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: BORDER,
+    backgroundColor: "rgba(255,255,255,0.03)",
+  },
+  pollGhostText: { color: MUTED, fontWeight: "700", fontSize: 12 },
+  pollPrimary: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: PRIMARY,
+  },
+  pollPrimaryText: { color: "#0a0f14", fontWeight: "900", fontSize: 12 },
 
   feedHeader: {
     paddingHorizontal: 2,

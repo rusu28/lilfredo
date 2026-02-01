@@ -7,6 +7,9 @@ import {
   Text,
   TextInput,
   View,
+  Image,
+  ScrollView,
+  useWindowDimensions,
 } from "react-native";
 import { MaterialIcons } from "@expo/vector-icons";
 import type { SocialMessagesProps } from "./types";
@@ -20,6 +23,26 @@ const TEXT = "#e7edf5";
 const MUTED = "#9aa6b2";
 const MUTED2 = "#7b8796";
 
+const formatTimeAgo = (iso?: string) => {
+  if (!iso) return "";
+  const ts = new Date(iso).getTime();
+  if (!Number.isFinite(ts)) return "";
+  const diff = Date.now() - ts;
+  if (diff < 60_000) return "just now";
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 60) return `${mins} minute${mins === 1 ? "" : "s"} ago`;
+  const hours = Math.floor(diff / 3_600_000);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  const days = Math.floor(diff / 86_400_000);
+  if (days < 7) return `${days} day${days === 1 ? "" : "s"} ago`;
+  const weeks = Math.floor(diff / (7 * 86_400_000));
+  if (weeks < 5) return `${weeks} week${weeks === 1 ? "" : "s"} ago`;
+  const months = Math.floor(diff / (30 * 86_400_000));
+  if (months < 12) return `${months} month${months === 1 ? "" : "s"} ago`;
+  const years = Math.floor(diff / (365 * 86_400_000));
+  return `${years} year${years === 1 ? "" : "s"} ago`;
+};
+
 export default function MessagesScreen({
   profileResults,
   messageUser,
@@ -28,6 +51,7 @@ export default function MessagesScreen({
   messageSearch,
   authUsername,
   isAdmin,
+  badgeMeta,
   onAdminDeleteMessage,
   onAdminEditMessage,
   onMessageSearchChange,
@@ -36,6 +60,8 @@ export default function MessagesScreen({
   onSendMessage,
   onBack,
 }: SocialMessagesProps) {
+  const { height } = useWindowDimensions();
+  const enableScroll = height < 780;
   const [menuId, setMenuId] = React.useState<string | null>(null);
   const [editId, setEditId] = React.useState<string | null>(null);
   const [editText, setEditText] = React.useState<string>("");
@@ -43,9 +69,37 @@ export default function MessagesScreen({
     ? profileResults.filter((p) => p.username.toLowerCase().includes(messageSearch.trim().toLowerCase()))
     : profileResults;
 
-  return (
-    <SafeAreaView style={styles.safe}>
-      <View style={styles.container}>
+  const BadgeInline = ({
+    ids,
+    size = 12,
+  }: {
+    ids?: string[];
+    size?: number;
+  }) => {
+    if (!ids?.length || !badgeMeta) return null;
+    return (
+      <View style={styles.badgeInlineRow}>
+        {ids.map((id) => {
+          const b = badgeMeta[id];
+          if (!b) return null;
+          if (b.type === "emoji") {
+            return (
+              <Text key={id} style={[styles.badgeEmoji, { fontSize: size }]}>
+                {b.value}
+              </Text>
+            );
+          }
+          if (b.type === "icon") {
+            return <MaterialIcons key={id} name={b.value as any} size={size} color="#e7edf5" />;
+          }
+          return <Image key={id} source={b.value as any} style={{ width: size, height: size, borderRadius: 4 }} />;
+        })}
+      </View>
+    );
+  };
+
+  const content = (
+    <View style={styles.container}>
         <View style={styles.header}>
           <View style={styles.brand}>
             <View style={styles.brandIcon}>
@@ -83,7 +137,10 @@ export default function MessagesScreen({
                     messageUser?.id === item.id && styles.friendRowActive,
                   ]}
                 >
-                  <Text style={styles.friendName}>{item.username}</Text>
+                  <View style={styles.nameInlineRow}>
+                    <Text style={styles.friendName}>{item.username}</Text>
+                    <BadgeInline ids={(item as any).badges} />
+                  </View>
                   <MaterialIcons name="chevron-right" size={18} color={MUTED} />
                 </Pressable>
               )}
@@ -96,9 +153,12 @@ export default function MessagesScreen({
 
           <View style={styles.chatCard}>
             <View style={styles.chatHeader}>
-              <Text style={styles.chatTitle}>
-                {messageUser ? messageUser.username : "Select a friend"}
-              </Text>
+              <View style={styles.nameInlineRow}>
+                <Text style={styles.chatTitle}>
+                  {messageUser ? messageUser.username : "Select a friend"}
+                </Text>
+                <BadgeInline ids={(messageUser as any)?.badges} size={12} />
+              </View>
               <Text style={styles.chatMeta}>Friends only</Text>
             </View>
 
@@ -114,12 +174,15 @@ export default function MessagesScreen({
                       <View style={[styles.bubbleRow, mine ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
                         <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleTheirs]}>
                           <View style={styles.bubbleTopRow}>
-                            <Text style={[styles.bubbleAuthor, mine && styles.bubbleAuthorMine]}>
-                              {fromName}
-                            </Text>
+                            <View style={styles.nameInlineRow}>
+                              <Text style={[styles.bubbleAuthor, mine && styles.bubbleAuthorMine]}>
+                                {fromName}
+                              </Text>
+                              <BadgeInline ids={(item as any).from_badges} size={10} />
+                            </View>
                             {item.created_at ? (
                               <Text style={[styles.bubbleTime, mine && styles.bubbleTimeMine]}>
-                                {new Date(item.created_at).toLocaleTimeString()}
+                                {formatTimeAgo(item.created_at)}
                               </Text>
                             ) : null}
                             {isAdmin ? (
@@ -201,13 +264,25 @@ export default function MessagesScreen({
             </View>
           </View>
         </View>
-      </View>
+    </View>
+  );
+
+  return (
+    <SafeAreaView style={styles.safe}>
+      {enableScroll ? (
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          {content}
+        </ScrollView>
+      ) : (
+        content
+      )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: BG },
+  scrollContent: { flexGrow: 1 },
   container: { flex: 1, paddingHorizontal: 16, paddingBottom: 16 },
 
   header: {
@@ -285,6 +360,9 @@ const styles = StyleSheet.create({
   },
   chatHeader: { paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: BORDER },
   chatTitle: { color: TEXT, fontWeight: "900" },
+  nameInlineRow: { flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" },
+  badgeInlineRow: { flexDirection: "row", alignItems: "center", gap: 4 },
+  badgeEmoji: { color: TEXT },
   chatMeta: { color: MUTED2, fontSize: 11, marginTop: 4 },
   chatBody: { flex: 1, paddingVertical: 8 },
   bubbleRow: { marginBottom: 10, flexDirection: "row" },

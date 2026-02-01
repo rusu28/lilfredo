@@ -1,4 +1,12 @@
 const { getSql, ensureSchema, json, requireAuth } = require("./_db");
+const { randomUUID } = require("crypto");
+
+const getSeasonId = () => {
+  const d = new Date();
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  return `${y}-${m}`;
+};
 
 exports.handler = async (event) => {
   if (event.httpMethod === "OPTIONS") return json(200, {});
@@ -9,7 +17,7 @@ exports.handler = async (event) => {
     const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
     const user = await requireAuth(token);
 
-    const { score, night } = JSON.parse(event.body || "{}");
+    const { score, night, collectibles } = JSON.parse(event.body || "{}");
     const scoreVal = Number(score);
     const nightVal = Number(night);
     if (!Number.isFinite(scoreVal) || scoreVal < 0) return json(400, { error: "Invalid score" });
@@ -18,7 +26,15 @@ exports.handler = async (event) => {
     const s = getSql();
     const scoreInt = Math.floor(scoreVal);
     const nightInt = Math.floor(nightVal);
-    await s`INSERT INTO scores (user_id, score, night) VALUES (${user.id}, ${scoreInt}, ${nightInt})`;
+    const seasonId = getSeasonId();
+    const seasonStart = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1, 0, 0, 0));
+    const seasonEnd = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() + 1, 1, 0, 0, 0));
+    await s`
+      INSERT INTO seasons (id, starts_at, ends_at)
+      VALUES (${seasonId}, ${seasonStart.toISOString()}, ${seasonEnd.toISOString()})
+      ON CONFLICT (id) DO NOTHING
+    `;
+    await s`INSERT INTO scores (user_id, score, night, season_id) VALUES (${user.id}, ${scoreInt}, ${nightInt}, ${seasonId})`;
     await s`
       INSERT INTO user_stats (user_id, best, sessions, highest_night, total_score)
       VALUES (${user.id}, ${scoreInt}, 1, ${nightInt}, ${scoreInt})
@@ -29,6 +45,15 @@ exports.handler = async (event) => {
         total_score = user_stats.total_score + EXCLUDED.total_score,
         updated_at = NOW()
     `;
+    if (Array.isArray(collectibles)) {
+      for (const c of collectibles) {
+        if (!c?.characterId) continue;
+        await s`
+          INSERT INTO collectibles (id, user_id, character_id, rarity, variant)
+          VALUES (${randomUUID()}, ${user.id}, ${String(c.characterId)}, ${String(c.rarity || "normal")}, ${c.variant ? String(c.variant) : null})
+        `;
+      }
+    }
     return json(200, { ok: true });
   } catch (e) {
     const msg = String(e?.message || "Submit failed");

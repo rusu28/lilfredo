@@ -12,7 +12,8 @@ exports.handler = async (event) => {
     if (!postId) return json(400, { error: "Missing postId" });
     const s = getSql();
     const rows = await s`
-      SELECT pc.id, pc.body, pc.created_at, pc.parent_id, u.username
+      SELECT pc.id, pc.body, pc.created_at, pc.parent_id, u.username,
+        (SELECT settings->'badgesSelected' FROM user_settings us WHERE us.user_id = u.id) AS badges
       FROM post_comments pc
       JOIN users u ON u.id = pc.user_id
       WHERE pc.post_id = ${postId}

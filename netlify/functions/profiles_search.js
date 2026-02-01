@@ -10,7 +10,8 @@ exports.handler = async (event) => {
     if (!q) return json(200, { results: [] });
     const s = getSql();
     const rows = await s`
-      SELECT u.id, u.username, u.role, pr.avatar_url, pr.verified
+      SELECT u.id, u.username, u.role, pr.avatar_url, pr.verified,
+        (SELECT settings->'badgesSelected' FROM user_settings us WHERE us.user_id = u.id) AS badges
       FROM users u
       LEFT JOIN profiles pr ON pr.user_id = u.id
       WHERE u.username ILIKE ${"%" + q + "%"}

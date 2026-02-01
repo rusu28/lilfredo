@@ -12,7 +12,8 @@ exports.handler = async (event) => {
     if (!username) return json(400, { error: "Missing username" });
     const s = getSql();
     const rows = await s`
-      SELECT u.id, u.username, pr.avatar_url, pr.bio, pr.verified
+      SELECT u.id, u.username, pr.avatar_url, pr.bio, pr.display_name, pr.display_font, pr.display_color, pr.banner_url, pr.background_url, pr.theme, pr.verified,
+        (SELECT settings->'badgesSelected' FROM user_settings us WHERE us.user_id = u.id) AS badges
       FROM users u
       LEFT JOIN profiles pr ON pr.user_id = u.id
       WHERE u.username = ${String(username)}

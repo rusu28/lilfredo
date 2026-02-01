@@ -8,12 +8,22 @@ exports.handler = async (event) => {
     const auth = event.headers?.authorization || event.headers?.Authorization || "";
     const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
     const user = await requireAuth(token);
-    const { avatarUrl, bio } = JSON.parse(event.body || "{}");
+    const { avatarUrl, bio, displayName, displayFont, displayColor, bannerUrl, backgroundUrl, theme } = JSON.parse(event.body || "{}");
     const s = getSql();
     await s`
       INSERT INTO profiles (user_id, avatar_url, bio)
       VALUES (${user.id}, ${avatarUrl ?? null}, ${bio ?? null})
-      ON CONFLICT (user_id) DO UPDATE SET avatar_url = EXCLUDED.avatar_url, bio = EXCLUDED.bio
+      ON CONFLICT (user_id) DO UPDATE SET avatar_url = COALESCE(EXCLUDED.avatar_url, profiles.avatar_url), bio = COALESCE(EXCLUDED.bio, profiles.bio)
+    `;
+    await s`
+      UPDATE profiles SET
+        display_name = ${displayName ?? null},
+        display_font = ${displayFont ?? null},
+        display_color = ${displayColor ?? null},
+        banner_url = ${bannerUrl ?? null},
+        background_url = ${backgroundUrl ?? null},
+        theme = ${theme ?? null}
+      WHERE user_id = ${user.id}
     `;
     return json(200, { ok: true });
   } catch (e) {

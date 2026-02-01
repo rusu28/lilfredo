@@ -1,6 +1,16 @@
 const { getSql, ensureSchema, json, requireAuth } = require("./_db");
 const { randomUUID } = require("crypto");
 
+const extractMentions = (text) => {
+  const mentions = new Set();
+  const re = /@([a-zA-Z0-9_\.]+)/g;
+  let m;
+  while ((m = re.exec(String(text))) !== null) {
+    mentions.add(m[1]);
+  }
+  return [...mentions];
+};
+
 exports.handler = async (event) => {
   if (event.httpMethod === "OPTIONS") return json(200, {});
   if (event.httpMethod !== "POST") return json(405, { error: "Method not allowed" });
@@ -21,6 +31,16 @@ exports.handler = async (event) => {
       INSERT INTO notifications (id, user_id, type, payload)
       VALUES (${randomUUID()}, ${toUserId}, 'message', ${JSON.stringify({ from: user.username })}::jsonb)
     `;
+    const mentions = extractMentions(body);
+    for (const uname of mentions) {
+      const u = await s`SELECT id FROM users WHERE lower(username) = ${String(uname).toLowerCase()} LIMIT 1`;
+      if (u?.[0]?.id && u[0].id !== user.id) {
+        await s`
+          INSERT INTO notifications (id, user_id, type, payload)
+          VALUES (${randomUUID()}, ${u[0].id}, 'mention', ${JSON.stringify({ from: user.username, messageId: id })}::jsonb)
+        `;
+      }
+    }
     return json(200, { id });
   } catch (e) {
     const msg = String(e?.message || "Send failed");

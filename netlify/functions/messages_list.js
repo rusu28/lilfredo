@@ -16,13 +16,19 @@ exports.handler = async (event) => {
     if (!f1?.length || !f2?.length) return json(403, { error: "Not friends" });
     const rows = await s`
       SELECT m.id, m.body, m.created_at, m.from_user_id, m.to_user_id,
-        u.username as from_username
+        u.username as from_username,
+        (SELECT settings->'badgesSelected' FROM user_settings us WHERE us.user_id = u.id) AS from_badges
       FROM messages m
       JOIN users u ON u.id = m.from_user_id
       WHERE (m.from_user_id = ${user.id} AND m.to_user_id = ${withUserId})
          OR (m.from_user_id = ${withUserId} AND m.to_user_id = ${user.id})
       ORDER BY m.created_at ASC
       LIMIT 200
+    `;
+    await s`
+      INSERT INTO message_reads (user_id, with_user_id, last_read_at)
+      VALUES (${user.id}, ${withUserId}, NOW())
+      ON CONFLICT (user_id, with_user_id) DO UPDATE SET last_read_at = NOW()
     `;
     return json(200, { messages: rows || [] });
   } catch (e) {

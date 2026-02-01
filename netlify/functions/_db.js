@@ -30,12 +30,24 @@ const ensureSchema = async () => {
         user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
         avatar_url TEXT,
         bio TEXT,
+        display_name TEXT,
+        display_font TEXT,
+        display_color TEXT,
+        banner_url TEXT,
+        background_url TEXT,
+        theme JSONB,
         verified BOOLEAN NOT NULL DEFAULT FALSE,
         created_at TIMESTAMPTZ DEFAULT NOW()
       )
     `;
     await s`ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'user'`;
     await s`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS verified BOOLEAN NOT NULL DEFAULT FALSE`;
+    await s`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS display_name TEXT`;
+    await s`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS display_font TEXT`;
+    await s`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS display_color TEXT`;
+    await s`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS banner_url TEXT`;
+    await s`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS background_url TEXT`;
+    await s`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS theme JSONB`;
     await s`
       CREATE TABLE IF NOT EXISTS sessions (
         token TEXT PRIMARY KEY,
@@ -96,9 +108,11 @@ const ensureSchema = async () => {
         user_id UUID REFERENCES users(id) ON DELETE CASCADE,
         body TEXT NOT NULL,
         snapshot JSONB,
-        created_at TIMESTAMPTZ DEFAULT NOW()
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        edited_at TIMESTAMPTZ
       )
     `;
+    await s`ALTER TABLE posts ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ`;
     await s`
       CREATE TABLE IF NOT EXISTS post_likes (
         user_id UUID REFERENCES users(id) ON DELETE CASCADE,
@@ -145,7 +159,167 @@ const ensureSchema = async () => {
         created_at TIMESTAMPTZ DEFAULT NOW()
       )
     `;
+    await s`
+      CREATE TABLE IF NOT EXISTS message_reads (
+        user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+        with_user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+        last_read_at TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (user_id, with_user_id)
+      )
+    `;
+    await s`
+      CREATE TABLE IF NOT EXISTS audit_logs (
+        id UUID PRIMARY KEY,
+        user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+        action TEXT NOT NULL,
+        details JSONB,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `;
+    await s`
+      CREATE TABLE IF NOT EXISTS spin_logs (
+        id UUID PRIMARY KEY,
+        user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+        reward_id TEXT NOT NULL,
+        reward_label TEXT NOT NULL,
+        rarity TEXT,
+        bet INT NOT NULL,
+        seed TEXT,
+        duration_ms INT,
+        credits_before INT,
+        credits_after INT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `;
+    await s`
+      CREATE TABLE IF NOT EXISTS presets (
+        id UUID PRIMARY KEY,
+        user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        config JSONB NOT NULL,
+        is_public BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `;
+    await s`
+      CREATE TABLE IF NOT EXISTS polls (
+        id UUID PRIMARY KEY,
+        user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+        question TEXT NOT NULL,
+        options TEXT[] NOT NULL,
+        poll_type TEXT NOT NULL DEFAULT 'single',
+        allow_multiple BOOLEAN NOT NULL DEFAULT FALSE,
+        correct_index INT,
+        edited_at TIMESTAMPTZ,
+        closes_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `;
+    await s`ALTER TABLE polls ADD COLUMN IF NOT EXISTS poll_type TEXT NOT NULL DEFAULT 'single'`;
+    await s`ALTER TABLE polls ADD COLUMN IF NOT EXISTS allow_multiple BOOLEAN NOT NULL DEFAULT FALSE`;
+    await s`ALTER TABLE polls ADD COLUMN IF NOT EXISTS correct_index INT`;
+    await s`ALTER TABLE polls ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ`;
+    await s`
+      CREATE TABLE IF NOT EXISTS poll_votes (
+        poll_id UUID REFERENCES polls(id) ON DELETE CASCADE,
+        user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+        option_index INT NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (poll_id, user_id)
+      )
+    `;
+    await s`ALTER TABLE poll_votes DROP CONSTRAINT IF EXISTS poll_votes_pkey`;
+    await s`ALTER TABLE poll_votes ADD PRIMARY KEY (poll_id, user_id, option_index)`;
+    await s`
+      CREATE TABLE IF NOT EXISTS challenge_completions (
+        challenge_id UUID REFERENCES challenges(id) ON DELETE CASCADE,
+        user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+        completed_at TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (challenge_id, user_id)
+      )
+    `;
+    await s`
+      CREATE TABLE IF NOT EXISTS challenges (
+        id UUID PRIMARY KEY,
+        creator_id UUID REFERENCES users(id) ON DELETE CASCADE,
+        title TEXT NOT NULL,
+        type TEXT NOT NULL,
+        description TEXT,
+        settings JSONB,
+        expires_at TIMESTAMPTZ NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `;
+    await s`ALTER TABLE challenges ADD COLUMN IF NOT EXISTS reward_credits INT NOT NULL DEFAULT 0`;
+    await s`ALTER TABLE challenges ADD COLUMN IF NOT EXISTS reward_gadget TEXT`;
+    await s`ALTER TABLE challenges ADD COLUMN IF NOT EXISTS gear_lock JSONB`;
+    await s`ALTER TABLE challenges ADD COLUMN IF NOT EXISTS preset_name TEXT`;
+    await s`ALTER TABLE challenges ADD COLUMN IF NOT EXISTS difficulty_score INT`;
+    await s`ALTER TABLE challenges ADD COLUMN IF NOT EXISTS pinned BOOLEAN NOT NULL DEFAULT FALSE`;
+    await s`ALTER TABLE challenges ADD COLUMN IF NOT EXISTS is_private BOOLEAN NOT NULL DEFAULT FALSE`;
+    await s`ALTER TABLE challenges ADD COLUMN IF NOT EXISTS access_code TEXT`;
+    await s`
+      CREATE TABLE IF NOT EXISTS challenge_scores (
+        id UUID PRIMARY KEY,
+        challenge_id UUID REFERENCES challenges(id) ON DELETE CASCADE,
+        user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+        score INT NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `;
+    await s`
+      CREATE TABLE IF NOT EXISTS seasons (
+        id TEXT PRIMARY KEY,
+        starts_at TIMESTAMPTZ NOT NULL,
+        ends_at TIMESTAMPTZ NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `;
+    await s`
+      CREATE TABLE IF NOT EXISTS season_badges (
+        id UUID PRIMARY KEY,
+        season_id TEXT REFERENCES seasons(id) ON DELETE CASCADE,
+        user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+        badge_id TEXT NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `;
+    await s`
+      CREATE TABLE IF NOT EXISTS collectibles (
+        id UUID PRIMARY KEY,
+        user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+        character_id TEXT NOT NULL,
+        rarity TEXT NOT NULL,
+        variant TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `;
+    await s`
+      CREATE TABLE IF NOT EXISTS trades (
+        id UUID PRIMARY KEY,
+        creator_id UUID REFERENCES users(id) ON DELETE CASCADE,
+        partner_id UUID REFERENCES users(id) ON DELETE SET NULL,
+        status TEXT NOT NULL DEFAULT 'open',
+        items_creator JSONB,
+        items_partner JSONB,
+        fee_credits INT NOT NULL DEFAULT 0,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `;
+    await s`
+      CREATE TABLE IF NOT EXISTS site_config (
+        key TEXT PRIMARY KEY,
+        value JSONB NOT NULL,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `;
+    await s`ALTER TABLE scores ADD COLUMN IF NOT EXISTS season_id TEXT`;
+    await s`CREATE INDEX IF NOT EXISTS challenge_scores_idx ON challenge_scores(challenge_id, score DESC, created_at ASC)`;
+    await s`CREATE INDEX IF NOT EXISTS spin_logs_user_idx ON spin_logs(user_id, created_at DESC)`;
+    await s`CREATE INDEX IF NOT EXISTS audit_logs_user_idx ON audit_logs(user_id, created_at DESC)`;
     await s`CREATE INDEX IF NOT EXISTS scores_created_at_idx ON scores(created_at DESC)`;
+    await s`CREATE INDEX IF NOT EXISTS scores_season_idx ON scores(season_id, score DESC, created_at DESC)`;
     await s`CREATE INDEX IF NOT EXISTS posts_created_at_idx ON posts(created_at DESC)`;
     await s`CREATE INDEX IF NOT EXISTS seeds_created_at_idx ON seeds(created_at DESC)`;
     await s`CREATE INDEX IF NOT EXISTS notifications_created_at_idx ON notifications(created_at DESC)`;

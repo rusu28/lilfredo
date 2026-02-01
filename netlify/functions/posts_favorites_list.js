@@ -14,9 +14,11 @@ exports.handler = async (event) => {
         p.id,
         p.body,
         p.created_at,
+        p.edited_at,
         u.id as user_id,
         u.username,
         pr.avatar_url,
+        (SELECT settings->'badgesSelected' FROM user_settings us WHERE us.user_id = u.id) AS badges,
         (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id = p.id) AS likes_count,
         (SELECT COUNT(*) FROM post_comments pc WHERE pc.post_id = p.id) AS comments_count
       FROM post_favorites pf

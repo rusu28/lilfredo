@@ -1,5 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
   Dimensions,
@@ -25,11 +25,38 @@ import LoginScreen from "../../components/social/Login";
 import MessagesScreen from "../../components/social/Messages";
 import NotificationsScreen from "../../components/social/Notifications";
 import ProfileScreen from "../../components/social/Profile";
+import TradeScreen from "../../components/social/Trade";
+import TradeMarketScreen from "../../components/social/TradeMarket";
 import AchievementsScreen from "../../components/social/Achievements";
+import BadgesScreen from "../../components/social/Badges";
+import CollectiblesScreen from "../../components/social/Collectibles";
 import { CHARACTER_CHOICES, resolveAvatarSource } from "../../components/social/avatar-source";
 import type { SocialPost, SocialRecentItem, SocialSoftButtonProps } from "../../components/social/types";
 
 const AnimatedImageBackground = Animated.createAnimatedComponent(ImageBackground);
+const DISPLAY_FONTS = [
+  "System",
+  "serif",
+  "sans-serif",
+  "monospace",
+  "Georgia",
+  "Times New Roman",
+  "Courier New",
+  "Verdana",
+  "Helvetica",
+  "Trebuchet MS",
+  "Comic Sans MS",
+  "Impact",
+  "Palatino",
+  "Garamond",
+  "Futura",
+  "Avenir",
+  "Didot",
+  "Baskerville",
+  "Copperplate",
+  "Noteworthy",
+  "Chalkboard",
+];
 
 let ExpoAudio: any;
 try {
@@ -89,6 +116,8 @@ const IMG = {
 
     ciolacu: require("../../assets/characters/ciolacu.jpg"),
     ioHannis: require("../../assets/characters/iohannis.jpg"),
+    iliebolojan: require("../../assets/characters/iliebolojan.jpg"),
+    nicusordan: require("../../assets/characters/nicusordan.png"),
 
     eugenionescu: require("../../assets/characters/eugenionescu.webp"),
     alecsandri: require("../../assets/characters/alecsandri.jpg"),
@@ -157,6 +186,23 @@ const JUMPSCARE_BY_ID: Record<string, any> = {
   fantomaArhivei: IMG.jumpscare[1],
 };
 
+const HOME_FEED_LIBRARY = [
+  { key: "holprincipal", label: "Hol Principal", source: IMG.rooms.holprincipal },
+  { key: "holstanga", label: "Hol Stanga", source: IMG.rooms.holstanga },
+  { key: "holdreapta", label: "Hol Dreapta", source: IMG.rooms.holdreapta },
+  { key: "back1", label: "Back 1", source: IMG.rooms.back1 },
+  { key: "back2", label: "Back 2", source: IMG.rooms.back2 },
+  { key: "back3", label: "Back 3", source: IMG.rooms.back3 },
+];
+
+const resolveHomeFeedImage = (key?: string | null) => {
+  if (!key) return null;
+  const found = HOME_FEED_LIBRARY.find((i) => i.key === key);
+  if (found) return found.source;
+  if (key.startsWith("http")) return { uri: key };
+  return null;
+};
+
 const SFX = {
   pressMusicButton: require("../../assets/sfx/pressmusicbutton.mp3"),
   seal: require("../../assets/sfx/seal.mp3"),
@@ -213,12 +259,19 @@ type Screen =
   | "WORKSHOP"
   | "INTEL"
   | "ACCOUNT"
+  | "SPIN"
   | "SEEDS"
   | "SOCIAL"
   | "NOTIFS"
   | "PROFILE"
   | "ACHIEVEMENTS"
-  | "MESSAGES";
+  | "BADGES"
+  | "MESSAGES"
+  | "ADMIN"
+  | "CHALLENGES"
+  | "TRADE"
+  | "TRADE_MARKET"
+  | "COLLECTIBLES";
 type GameMode = "STORY" | "CUSTOM" | "ENDLESS" | "CHALLENGE" | "STEALTH" | "RUSH";
 type Gadget = "sealTape" | "flashCharge" | "batterySwap" | "signalJammer" | null;
 type DifficultyPreset = "EASY" | "NORMAL" | "HARD" | "NIGHTMARE";
@@ -613,7 +666,24 @@ const hash01 = (s: string) => {
   return (Math.abs(h) % 1000) / 1000;
 };
 
+const challengeMultiplier = (c: any) => {
+  if (!c) return 1;
+  let mult = 1;
+  if (c.noCams) mult += 0.15;
+  if (c.noFlash) mult += 0.1;
+  if (c.noOverclock) mult += 0.1;
+  if (c.noDoors) mult += 0.12;
+  if (c.onlyVents) mult += 0.08;
+  if (c.doubleDrain) mult += 0.12;
+  if (c.oneBattery) mult += 0.1;
+  return mult;
+};
+
 const { width: SW, height: SH } = Dimensions.get("window");
+const uiCompact = SW < 1200 || SH < 900;
+const ultraCompact = SW < 560 || SH < 740;
+const microCompact = SW < 420 || SH < 680;
+const dockCols = microCompact ? 1 : SW < 520 || SH < 700 ? 2 : SW < 900 ? 3 : 4;
 
 // 2D -> 3D effect
 const depthToScale = (depth: number) => 0.35 + depth * 0.95; // 0.35..1.3
@@ -653,11 +723,36 @@ const TASK_DEFS: TaskDef[] = [
   { id: "powergrid", name: "Power Grid Sync", desc: "Sincronizează grid-ul pentru stabilitate.", steps: 5, reward: 160, drain: 0.025 },
 ];
 
-const SKILL_DEFS: { id: SkillId; name: string; desc: string; cost: number }[] = [
-  { id: "scanRange", name: "Scan Range", desc: "+durata scan", cost: 120 },
-  { id: "doorSpeed", name: "Door Speed", desc: "+rezistență uși", cost: 140 },
-  { id: "camClarity", name: "Cam Clarity", desc: "-glitch / -dead zones", cost: 150 },
+const SKILL_DEFS: { id: SkillId; name: string; desc: string; cost: number; tier: 1 | 2 | 3 }[] = [
+  { id: "scanRange", name: "Scan Range I", desc: "+durata scan", cost: 120, tier: 1 },
+  { id: "scanRangeT2", name: "Scan Range II", desc: "+ și mai mult range", cost: 180, tier: 2 },
+  { id: "scanRangeT3", name: "Scan Range III", desc: "max range + reveal mai clar", cost: 260, tier: 3 },
+  { id: "doorSpeed", name: "Door Speed I", desc: "+rezistență uși", cost: 140, tier: 1 },
+  { id: "doorSpeedT2", name: "Door Speed II", desc: "uși se închid/deschid mai rapid", cost: 190, tier: 2 },
+  { id: "doorSpeedT3", name: "Door Speed III", desc: "uși aproape instant, consum mai mic", cost: 260, tier: 3 },
+  { id: "camClarity", name: "Cam Clarity I", desc: "-glitch / -dead zones", cost: 150, tier: 1 },
+  { id: "camClarityT2", name: "Cam Clarity II", desc: "claritate + reducere noise", cost: 210, tier: 2 },
+  { id: "camClarityT3", name: "Cam Clarity III", desc: "anti-fog, anti-glitch", cost: 280, tier: 3 },
 ];
+
+const BADGES: {
+  id: string;
+  name: string;
+  type: "emoji" | "image" | "icon";
+  value: any;
+  desc?: string;
+}[] = [
+  { id: "verified", name: "Verified", type: "icon", value: "verified", desc: "Verified user" },
+  { id: "moderator", name: "Moderator", type: "icon", value: "gavel", desc: "Moderator badge" },
+  { id: "early_bird", name: "Early Access", type: "emoji", value: "??", desc: "Available until March" },
+  { id: "bolojan", name: "Bolojan", type: "image", value: IMG.characters.iliebolojan, desc: "Seen Bolojan" },
+  { id: "nicusor", name: "Nicusor Dan", type: "image", value: IMG.characters.nicusordan, desc: "Seen Nicusor Dan" },
+  { id: "rose", name: "Rose", type: "emoji", value: "??", desc: "Finish a match at least once" },
+  { id: "season_top1", name: "Season #1", type: "emoji", value: "??", desc: "Season #1 leaderboard" },
+  { id: "season_top2", name: "Season #2", type: "emoji", value: "??", desc: "Season #2 leaderboard" },
+  { id: "season_top3", name: "Season #3", type: "emoji", value: "??", desc: "Season #3 leaderboard" },
+];
+
 
 const CONTRACT_DEFS: { id: string; name: string; desc: string; target: number; reward: number }[] = [
   { id: "scan3", name: "Operator Scan", desc: "Folosește scan de 3 ori într-o noapte.", target: 3, reward: 90 },
@@ -665,11 +760,24 @@ const CONTRACT_DEFS: { id: string; name: string; desc: string; target: number; r
   { id: "tasks2", name: "Maintenance", desc: "Completează 2 task-uri.", target: 2, reward: 110 },
 ];
 
-const GADGET_SHOP: { id: Gadget; name: string; cost: number; desc: string; rarity: "common" | "rare" | "epic" }[] = [
-  { id: "sealTape", name: "Seal Tape", cost: 6, desc: "Blochează venturile mai mult timp.", rarity: "common" },
-  { id: "flashCharge", name: "Flash Charge", cost: 7, desc: "Reîncărcare extra pentru LIGHT.", rarity: "rare" },
-  { id: "batterySwap", name: "Battery Swap", cost: 8, desc: "Mic boost instant la Power.", rarity: "rare" },
-  { id: "signalJammer", name: "Signal Jammer", cost: 9, desc: "Blochează temporar semnalul AI.", rarity: "epic" },
+const GADGET_SHOP: {
+  id: Gadget;
+  name: string;
+  cost: number;
+  desc: string;
+  rarity: "common" | "rare" | "epic" | "legendary" | "mythic";
+}[] = [
+  { id: "sealTape", name: "Seal Tape", cost: 6, desc: "Sigilează vent 6s fără power.", rarity: "common" },
+  { id: "flashCharge", name: "Flash Charge", cost: 7, desc: "Flash instant, consum redus.", rarity: "common" },
+  { id: "batterySwap", name: "Battery Swap", cost: 8, desc: "Reumple +20% power.", rarity: "rare" },
+  { id: "signalJammer", name: "Signal Jammer", cost: 9, desc: "Încetinește AI 6s.", rarity: "rare" },
+  { id: "ventFoam", name: "Vent Foam", cost: 10, desc: "Scade viteza pe vent 10s.", rarity: "rare" },
+  { id: "coolMist", name: "Cool Mist", cost: 11, desc: "-10 heat, -noise 5s.", rarity: "rare" },
+  { id: "lureBeacon", name: "Lure Beacon", cost: 12, desc: "Atrage spre view selectat 5s.", rarity: "epic" },
+  { id: "shockMine", name: "Shock Mine", cost: 14, desc: "Stun în hol/vent o dată.", rarity: "epic" },
+  { id: "overclockCore", name: "Overclock Core", cost: 16, desc: "+100% scan 6s, +heat.", rarity: "epic" },
+  { id: "batteryPlus", name: "Battery 100%", cost: 18, desc: "Reumple power la 100%.", rarity: "legendary" },
+  { id: "artifactShard", name: "Artifact Shard", cost: 22, desc: "Oprește boss 1 dată/noapte.", rarity: "mythic" },
 ];
 
 const RADIO_LINES = [
@@ -792,6 +900,15 @@ const NIGHT_MODIFIERS: { id: ModifierId; name: string; desc: string }[] = [
   { id: "lowPowerStart", name: "Low Power Start", desc: "Începi cu power redus." },
 ];
 const DEALER_ID = "tehnicianul";
+const SPIN_REWARDS: { id: string; label: string; type: "credits" | "gadget"; value: number; rarity: string }[] = [
+  { id: "c25", label: "+25 Credits", type: "credits", value: 25, rarity: "common" },
+  { id: "c75", label: "+75 Credits", type: "credits", value: 75, rarity: "rare" },
+  { id: "c200", label: "+200 Credits", type: "credits", value: 200, rarity: "epic" },
+  { id: "g_overclock", label: "Overclock Core", type: "gadget", value: 1, rarity: "epic" },
+  { id: "g_battery", label: "Battery+", type: "gadget", value: 1, rarity: "rare" },
+  { id: "g_artifact", label: "Artifact Shard", type: "gadget", value: 1, rarity: "legendary" },
+  { id: "c500", label: "+500 Credits", type: "credits", value: 500, rarity: "mythic" },
+];
 
 // UI helpers
 const shadow = Platform.select({
@@ -802,6 +919,7 @@ const shadow = Platform.select({
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>("LOADING");
+  const [uiTick, setUiTick] = useState(0);
   const [profileName, setProfileName] = useState("");
   const [profileLoaded, setProfileLoaded] = useState(false);
   const [scoreLog, setScoreLog] = useState<{ score: number; night: number; who: string; ts: number }[]>([]);
@@ -815,9 +933,19 @@ export default function App() {
   const [authError, setAuthError] = useState("");
   const [registerMode, setRegisterMode] = useState(false);
   const [remoteScores, setRemoteScores] = useState<{ username: string; score: number; night: number }[]>([]);
+  const [remoteCoins, setRemoteCoins] = useState<{ username: string; credits: number }[]>([]);
+  const [remoteChallenges, setRemoteChallenges] = useState<{ username: string; count: number }[]>([]);
+  const [scoreTab, setScoreTab] = useState<"score" | "coins" | "challenges">("score");
+  const [seasonId, setSeasonId] = useState("");
+  const [seasonScores, setSeasonScores] = useState<{ username: string; score: number; night: number }[]>([]);
   const [remoteLoading, setRemoteLoading] = useState(false);
   const [profileAvatar, setProfileAvatar] = useState("");
   const [profileBio, setProfileBio] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [displayFont, setDisplayFont] = useState("System");
+  const [displayColor, setDisplayColor] = useState("#EAF2FF");
+  const [profileBanner, setProfileBanner] = useState("back1");
+  const [profileBackground, setProfileBackground] = useState("back1");
   const [seedName, setSeedName] = useState("");
   const [seeds, setSeeds] = useState<any[]>([]);
   const [seedBusy, setSeedBusy] = useState(false);
@@ -826,6 +954,11 @@ export default function App() {
   const [seedSearch, setSeedSearch] = useState("");
   const [postBody, setPostBody] = useState("");
   const [posts, setPosts] = useState<any[]>([]);
+  const [polls, setPolls] = useState<any[]>([]);
+  const [homeFeedItems, setHomeFeedItems] = useState<any[]>([]);
+  const [adminFeedDraft, setAdminFeedDraft] = useState<any[]>([]);
+  const [trades, setTrades] = useState<any[]>([]);
+  const [collectibles, setCollectibles] = useState<any[]>([]);
   const [socialLoading, setSocialLoading] = useState(false);
   const [commentsByPost, setCommentsByPost] = useState<Record<string, any[]>>({});
   const [commentDraft, setCommentDraft] = useState<Record<string, string>>({});
@@ -843,12 +976,20 @@ export default function App() {
   const [profileLikedPosts, setProfileLikedPosts] = useState<SocialPost[]>([]);
   const [profileFavoritePosts, setProfileFavoritePosts] = useState<SocialPost[]>([]);
   const [profilePosts, setProfilePosts] = useState<SocialPost[]>([]);
+  const [profilePolls, setProfilePolls] = useState<any[]>([]);
   const [dmDraft, setDmDraft] = useState("");
   const [dmMessages, setDmMessages] = useState<any[]>([]);
   const [notifications, setNotifications] = useState<any[]>([]);
   const [messageUser, setMessageUser] = useState<any | null>(null);
   const [messageSearch, setMessageSearch] = useState("");
   const [featuredAchievements, setFeaturedAchievements] = useState<string[]>([]);
+  const [badgesSelected, setBadgesSelected] = useState<string[]>([]);
+  const [seasonBadges, setSeasonBadges] = useState<string[]>([]);
+  const [pinnedPostId, setPinnedPostId] = useState<string>("");
+  const [spinPity, setSpinPity] = useState(0);
+  const [spinLog, setSpinLog] = useState<
+    { ts: number; seed: string; bet: number; reward: string; rarity: string }[]
+  >([]);
   const [accountUsername, setAccountUsername] = useState("");
   const [accountEmail, setAccountEmail] = useState("");
   const [accountCurrentPass, setAccountCurrentPass] = useState("");
@@ -857,9 +998,115 @@ export default function App() {
   const [adminNoticeTitle, setAdminNoticeTitle] = useState("");
   const [adminNoticeBody, setAdminNoticeBody] = useState("");
   const [adminNoticeFrom, setAdminNoticeFrom] = useState("");
+  const [adminNoticeMinutes, setAdminNoticeMinutes] = useState("");
+  const [adminCreditUser, setAdminCreditUser] = useState("");
+  const [adminCreditAmount, setAdminCreditAmount] = useState("1000");
+  const [adminStatus, setAdminStatus] = useState("");
   const [achievementSearch, setAchievementSearch] = useState("");
   const [feedSearch, setFeedSearch] = useState("");
   const [recents, setRecents] = useState<SocialRecentItem[]>([]);
+  const [spinRunning, setSpinRunning] = useState(false);
+  const [spinResult, setSpinResult] = useState<string | null>(null);
+  const [spinBet, setSpinBet] = useState(25);
+  const [spinHitId, setSpinHitId] = useState<string | null>(null);
+  const spinCooldownUntil = useRef(0);
+  const lastSpinTs = useRef(0);
+  const [challenges, setChallenges] = useState<any[]>([]);
+  const [challengeTitle, setChallengeTitle] = useState("");
+  const [challengeDesc, setChallengeDesc] = useState("");
+  const [challengeType, setChallengeType] = useState<"daily" | "weekly" | "custom">("daily");
+  const [challengeStatus, setChallengeStatus] = useState("");
+  const [challengeReward, setChallengeReward] = useState("0");
+  const [challengePreset, setChallengePreset] = useState("");
+  const [challengeDiff, setChallengeDiff] = useState("50");
+  const [challengeGear, setChallengeGear] = useState("");
+  const [challengeGearAllowed, setChallengeGearAllowed] = useState<string[]>([]);
+  const [challengeGearFree, setChallengeGearFree] = useState<string[]>([]);
+  const [challengeChars, setChallengeChars] = useState<string[]>([]);
+  const [challengePinned, setChallengePinned] = useState(false);
+  const [challengeSelected, setChallengeSelected] = useState<any | null>(null);
+  const [challengeJoinedIds, setChallengeJoinedIds] = useState<string[]>([]);
+  const [challengeJoinCode, setChallengeJoinCode] = useState("");
+  const gearOverrideRef = useRef<any[] | null>(null);
+  const challengeRunRef = useRef<string | null>(null);
+  const [challengeTab, setChallengeTab] = useState<"list" | "create" | "detail">("list");
+  const [challengeFont, setChallengeFont] = useState("System");
+  const [challengeRewardGadget, setChallengeRewardGadget] = useState("");
+  const [challengeThumb, setChallengeThumb] = useState("back1");
+  const [challengeIcon, setChallengeIcon] = useState("back2");
+  const [challengePrivate, setChallengePrivate] = useState(false);
+  const [challengeAccessCode, setChallengeAccessCode] = useState("");
+  const [challengeFlags, setChallengeFlags] = useState({
+    camera: true,
+    doorL: true,
+    doorR: true,
+    music: true,
+    vents: true,
+  });
+  const spinAnim = useRef(new Animated.Value(0)).current;
+  const spinStrip = useMemo(() => Array.from({ length: 600 }, (_, i) => SPIN_REWARDS[i % SPIN_REWARDS.length]), []);
+  const spinTargetRef = useRef<number>(0);
+
+  const runSpin = (reward: (typeof SPIN_REWARDS)[number], bet: number, onFinish?: () => void) => {
+    if (spinRunning) return;
+    setSpinRunning(true);
+    setSpinResult(null);
+    const spinSeed = `${Date.now()}-${Math.random()}`;
+    const creditsBefore = credits;
+    const startTs = Date.now();
+    setTimeout(() => {
+      if (reward.type === "credits") {
+        setCredits((c) => {
+          const mult = Math.max(1, bet / 50);
+          const next = c + Math.round(reward.value * mult);
+          saveSettingsImmediate({ credits: next });
+          persistLocal(CREDITS_KEY, String(next));
+          return next;
+        });
+      } else {
+        const amount = bet >= 200 ? 2 : 1;
+        addInventory(reward.id.replace("g_", "") as any, amount);
+      }
+      const endTs = Date.now();
+      setSpinResult(reward.label);
+      setSpinRunning(false);
+      setSpinPity((prev) => {
+        const isBig = reward.rarity === "epic" || reward.rarity === "legendary" || reward.rarity === "mythic";
+        const next = isBig ? 0 : prev + 1;
+        saveSettingsImmediate({ spinPity: next });
+        return next;
+      });
+      setSpinLog((prev) => {
+        const next = [
+          { ts: Date.now(), seed: spinSeed, bet, reward: reward.label, rarity: reward.rarity },
+          ...(prev || []),
+        ].slice(0, 30);
+        saveSettingsImmediate({ spinLog: next });
+        return next;
+      });
+      spinCooldownUntil.current = Date.now() + 3000;
+      apiPost("spin_log", {
+        rewardId: reward.id,
+        rewardLabel: reward.label,
+        rarity: reward.rarity,
+        bet,
+        seed: spinSeed,
+        durationMs: endTs - startTs,
+        creditsBefore,
+        creditsAfter: reward.type === "credits" ? creditsBefore + Math.round(reward.value * Math.max(1, bet / 50)) : creditsBefore,
+      }).catch(() => {});
+      onFinish?.();
+    }, 1200);
+  };
+
+  // local-only persistence helper (guests). Auth users save to DB instead.
+  const persistLocal = useCallback(
+    (key: string, value: string) => {
+      if (authToken) return;
+      AsyncStorage.setItem(key, value).catch(() => {});
+    },
+    [authToken]
+  );
 
   // menu selection
   const [bgPick, setBgPick] = useState<"back1" | "back2" | "back3">("back1");
@@ -893,6 +1140,8 @@ export default function App() {
     doubleDrain: false,
     onlyVents: false,
     oneBattery: false,
+    noFlash: false,
+    noOverclock: false,
   });
   const [gadgets, setGadgets] = useState<Gadget[]>(["sealTape", "flashCharge"]);
   const [ventHealth, setVentHealth] = useState(100);
@@ -903,7 +1152,7 @@ export default function App() {
   const selectedList = useMemo(() => CHARACTERS_50.filter((c) => !!selected[c.id]), [selected]);
   const bossDef = useMemo(() => CHARACTERS_50.find((c) => c.id === "vladtepes"), []);
   const presetActive = modePreset !== "NORMAL";
-  const canStart = presetActive || selectedList.length >= 4;
+  const canStart = selectedList.length >= 4;
 
   // async score
   const [best, setBest] = useState(0);
@@ -913,6 +1162,7 @@ export default function App() {
   const [achievementToast, setAchievementToast] = useState("");
   const [achievementUntil, setAchievementUntil] = useState(0);
   const [inventory, setInventory] = useState<Record<string, number>>({});
+  const [equipPick, setEquipPick] = useState<{ id: Gadget; slot: number | null } | null>(null);
 
   // game state
   const [night, setNight] = useState(1); // 1..5
@@ -998,6 +1248,7 @@ export default function App() {
   const [dealUntil, setDealUntil] = useState(0);
 
   const settingsReadyRef = useRef(false);
+  const settingsLoadedRef = useRef(false);
   const settingsSaveTimeout = useRef<any>(null);
 
   // refs
@@ -1050,6 +1301,7 @@ export default function App() {
   const radarPulse = useRef(new Animated.Value(0)).current;
 
   const now = () => Date.now();
+  const uiNow = now() + uiTick;
   const dateKey = () => new Date().toISOString().slice(0, 10);
   const seedFromDate = (d: string) => {
     let h = 2166136261;
@@ -1070,8 +1322,8 @@ export default function App() {
   };
   const rngRef = useRef<() => number>(() => Math.random());
   const rand = () => (dailyRun ? rngRef.current() : Math.random());
-  const isCd = (until: number) => now() < until;
-  const cdLeft = (until: number) => Math.max(0, (until - now()) / 1000);
+  const isCd = (until: number) => uiNow < until;
+  const cdLeft = (until: number) => Math.max(0, (until - uiNow) / 1000);
 
   const sealL = now() < sealLUntil;
   const sealR = now() < sealRUntil;
@@ -1100,6 +1352,8 @@ export default function App() {
   const isStealth = mode === "STEALTH";
   const isRush = mode === "RUSH";
   const noCamsMode = challenge.noCams || isStealth;
+  const noFlash = challenge.noFlash;
+  const noOverclock = challenge.noOverclock;
 
   const camView = VIEWS[camIndex] ?? VIEWS[0];
   const camDead = cameraOpen && (camDeadUntil[camView.id] ?? 0) > now();
@@ -1109,38 +1363,42 @@ export default function App() {
   const spikeBlocksCams = powerSpike && powerSpikeChoice === "DOORS";
   const spikeBlocksDoors = powerSpike && powerSpikeChoice === "CAMS";
 
-  // Load best
+  // Load local (guest) fallback + resume token; account data overrides from API once logged in
   useEffect(() => {
     (async () => {
       try {
-        const v = await AsyncStorage.getItem(BEST_KEY);
-        if (v) setBest(parseInt(v, 10) || 0);
         const profile = await AsyncStorage.getItem(PROFILE_KEY);
-        if (profile) setProfileName(profile);
         const auth = await AsyncStorage.getItem(AUTH_KEY);
-        if (auth) setAuthToken(auth);
-        const log = await AsyncStorage.getItem(SCORE_LOG_KEY);
-        if (log) setScoreLog(JSON.parse(log));
-        const c = await AsyncStorage.getItem(CREDITS_KEY);
-        if (c) setCredits(parseInt(c, 10) || 0);
-        const intelRaw = await AsyncStorage.getItem(INTEL_KEY);
-        if (intelRaw) setIntel(JSON.parse(intelRaw));
-        const achRaw = await AsyncStorage.getItem(ACHIEVE_KEY);
-        if (achRaw) setAchievements(JSON.parse(achRaw));
-        const invRaw = await AsyncStorage.getItem(INVENTORY_KEY);
-        if (invRaw) setInventory(JSON.parse(invRaw));
-        const dailyRaw = await AsyncStorage.getItem(DAILY_KEY);
-        if (dailyRaw) setDailyScores(JSON.parse(dailyRaw));
-        const adaptRaw = await AsyncStorage.getItem(ADAPT_KEY);
-        if (adaptRaw) setAdaptiveDeaths(parseInt(adaptRaw, 10) || 0);
-        const ghostRaw = await AsyncStorage.getItem(GHOST_KEY);
-        if (ghostRaw) setGhostByView(JSON.parse(ghostRaw));
-        const skillRaw = await AsyncStorage.getItem(SKILL_KEY);
-        if (skillRaw) setSkills(JSON.parse(skillRaw));
-        const contractRaw = await AsyncStorage.getItem(CONTRACT_KEY);
-        if (contractRaw) setContracts(JSON.parse(contractRaw));
         const recentsRaw = await AsyncStorage.getItem(RECENTS_KEY);
         if (recentsRaw) setRecents(JSON.parse(recentsRaw));
+        if (profile) setProfileName(profile);
+        if (auth) setAuthToken(auth);
+
+        // Load guest cache only if no auth token
+        if (!auth) {
+          const v = await AsyncStorage.getItem(BEST_KEY);
+          if (v) setBest(parseInt(v, 10) || 0);
+          const log = await AsyncStorage.getItem(SCORE_LOG_KEY);
+          if (log) setScoreLog(JSON.parse(log));
+          const c = await AsyncStorage.getItem(CREDITS_KEY);
+          if (c) setCredits(parseInt(c, 10) || 0);
+          const intelRaw = await AsyncStorage.getItem(INTEL_KEY);
+          if (intelRaw) setIntel(JSON.parse(intelRaw));
+          const achRaw = await AsyncStorage.getItem(ACHIEVE_KEY);
+          if (achRaw) setAchievements(JSON.parse(achRaw));
+          const invRaw = await AsyncStorage.getItem(INVENTORY_KEY);
+          if (invRaw) setInventory(JSON.parse(invRaw));
+          const dailyRaw = await AsyncStorage.getItem(DAILY_KEY);
+          if (dailyRaw) setDailyScores(JSON.parse(dailyRaw));
+          const adaptRaw = await AsyncStorage.getItem(ADAPT_KEY);
+          if (adaptRaw) setAdaptiveDeaths(parseInt(adaptRaw, 10) || 0);
+          const ghostRaw = await AsyncStorage.getItem(GHOST_KEY);
+          if (ghostRaw) setGhostByView(JSON.parse(ghostRaw));
+          const skillRaw = await AsyncStorage.getItem(SKILL_KEY);
+          if (skillRaw) setSkills(JSON.parse(skillRaw));
+          const contractRaw = await AsyncStorage.getItem(CONTRACT_KEY);
+          if (contractRaw) setContracts(JSON.parse(contractRaw));
+        }
       } catch {}
       setProfileLoaded(true);
     })();
@@ -1311,6 +1569,49 @@ export default function App() {
       })
       .catch(() => setRemoteScores([]))
       .finally(() => setRemoteLoading(false));
+
+    fetch(apiUrl("leaderboard_credits"))
+      .then((r) => r.json())
+      .then((d) => {
+        const arr = Array.isArray(d?.scores) ? d.scores : [];
+        setRemoteCoins(
+          arr.map((x) => ({ username: String(x.username || "unknown"), credits: Number(x.credits) || 0 }))
+        );
+      })
+      .catch(() => setRemoteCoins([]));
+
+    fetch(apiUrl("leaderboard_challenges"))
+      .then((r) => r.json())
+      .then((d) => {
+        const arr = Array.isArray(d?.scores) ? d.scores : [];
+        setRemoteChallenges(
+          arr.map((x) => ({ username: String(x.username || "unknown"), count: Number(x.count) || 0 }))
+        );
+      })
+      .catch(() => setRemoteChallenges([]));
+    fetch(apiUrl("season_current"))
+      .then((r) => r.json())
+      .then((d) => {
+        const sid = String(d?.seasonId || "");
+        if (!sid) return;
+        setSeasonId(sid);
+        return fetch(apiUrl(`season_leaderboard?season=${encodeURIComponent(sid)}`));
+      })
+      .then((r) => (r ? r.json() : null))
+      .then((d) => {
+        const arr = Array.isArray(d?.scores) ? d.scores : [];
+        const bestByUser = new Map<string, { username: string; score: number; night: number }>();
+        for (const s of arr) {
+          const key = String(s.username || "unknown");
+          const current = bestByUser.get(key);
+          if (!current || s.score > current.score) {
+            bestByUser.set(key, { username: key, score: s.score, night: s.night || 1 });
+          }
+        }
+        const deduped = Array.from(bestByUser.values()).sort((a, b) => b.score - a.score);
+        setSeasonScores(deduped);
+      })
+      .catch(() => setSeasonScores([]));
   }, [screen]);
 
   useEffect(() => {
@@ -1330,45 +1631,124 @@ export default function App() {
             const prof = await apiGet(`profile_get?username=${encodeURIComponent(uname)}`);
             setProfileAvatar(prof?.profile?.avatar_url ?? "");
             setProfileBio(prof?.profile?.bio ?? "");
+            setDisplayName(prof?.profile?.display_name || prof?.profile?.username || uname);
+            setDisplayFont(prof?.profile?.display_font || "System");
+            setDisplayColor(prof?.profile?.display_color || "#EAF2FF");
+            setProfileBanner(prof?.profile?.banner_url || "back1");
+            setProfileBackground(prof?.profile?.background_url || "back1");
           } catch {}
         }
       })
       .catch(() => {});
   }, [authToken]);
 
+  // Web deep-link: /profile/{username}
+  useEffect(() => {
+    if (Platform.OS !== "web") return;
+    const path = window.location.pathname || "";
+    const m = path.match(/\/profile\/([^/]+)/);
+    if (m && m[1]) {
+      const u = decodeURIComponent(m[1]);
+      openProfile(u);
+      setScreen("PROFILE");
+    }
+  }, [authToken]);
+
   useEffect(() => {
     if (!authToken) {
       setUserStats(null);
+      setHomeFeedItems([]);
+      setTrades([]);
+      setCollectibles([]);
       settingsReadyRef.current = false;
+      settingsLoadedRef.current = false;
       return;
     }
     settingsReadyRef.current = false;
+    settingsLoadedRef.current = false;
     (async () => {
+      let settingsFetched = false;
       try {
         const s = await apiGet("settings_get");
+        settingsFetched = true;
         if (s?.settings) applySettings(s.settings);
-      } catch {}
-      try {
+        else {
+          await apiPost("settings_update", { settings: buildSettings() });
+        }
         const st = await apiGet("stats_get");
         setUserStats(st?.stats ?? null);
-      } catch {}
-      try {
         const sl = await apiGet("seeds_list");
         setSeeds(sl?.seeds ?? []);
+        const sb = await apiGet("season_badges_list");
+        const ids = Array.isArray(sb?.badges) ? sb.badges.map((b: any) => String(b.badge_id || b.id || "")) : [];
+        setSeasonBadges(ids.filter((x: string) => x));
+        const hf = await apiGet("home_feed_get");
+        const feedItems = Array.isArray(hf?.items) ? hf.items : [];
+        setHomeFeedItems(feedItems);
+        setAdminFeedDraft(feedItems);
+        const tl = await apiGet("trade_list");
+        setTrades(Array.isArray(tl?.trades) ? tl.trades : []);
+        const cl = await apiGet("collectible_list");
+        setCollectibles(Array.isArray(cl?.collectibles) ? cl.collectibles : []);
       } catch {}
       setTimeout(() => {
         settingsReadyRef.current = true;
+        settingsLoadedRef.current = settingsFetched;
       }, 800);
     })();
   }, [authToken]);
 
   useEffect(() => {
-    if (!authToken || !settingsReadyRef.current) return;
+    apiGet("home_feed_get")
+      .then((d) => {
+        const items = Array.isArray(d?.items) ? d.items : [];
+        setHomeFeedItems(items);
+        setAdminFeedDraft(items);
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!authToken || !settingsReadyRef.current || !settingsLoadedRef.current) return;
     if (settingsSaveTimeout.current) clearTimeout(settingsSaveTimeout.current);
     settingsSaveTimeout.current = setTimeout(() => {
       apiPost("settings_update", { settings: buildSettings() }).catch(() => {});
     }, 900);
-  }, [authToken, bgPick, difficultyPreset, mode, modePreset, modeTier, dailyRun, night6, hardcore, selected, customLevels, challenge, featuredAchievements]);
+  }, [
+    authToken,
+    bgPick,
+    difficultyPreset,
+    mode,
+    modePreset,
+    modeTier,
+    dailyRun,
+    night6,
+    hardcore,
+    selected,
+    customLevels,
+    challenge,
+    featuredAchievements,
+    badgesSelected,
+    pinnedPostId,
+    spinPity,
+    spinLog,
+    pinnedPostId,
+    spinPity,
+    spinLog,
+    best,
+    credits,
+    scoreLog,
+    dailyScores,
+    adaptiveDeaths,
+    ghostByView,
+    intel,
+    achievements,
+    inventory,
+    gadgets,
+    skills,
+    contracts,
+    scoreLog,
+  ]);
 
   useEffect(() => {
     if (screen !== "SOCIAL") return;
@@ -1378,6 +1758,9 @@ export default function App() {
       .then((d) => setPosts(d?.posts ?? []))
       .catch(() => setPosts([]))
       .finally(() => setSocialLoading(false));
+    apiGet("poll_list")
+      .then((d) => setPolls(d?.polls ?? []))
+      .catch(() => setPolls([]));
     apiGet("profiles_top")
       .then((d) => setProfileResults(d?.results ?? []))
       .catch(() => setProfileResults([]));
@@ -1594,6 +1977,41 @@ export default function App() {
 
   const startGame = () => {
     if (!canStart) return;
+    // enforce gear lock from selected challenge (if any)
+    if (
+      challengeSelected?.gear_lock?.allowed?.length ||
+      challengeSelected?.gear_lock?.free?.length ||
+      challengeSelected?.settings?.allowedGear?.length ||
+      challengeSelected?.settings?.freeGear?.length
+    ) {
+      const allowed = (challengeSelected.gear_lock?.allowed as string[]) || challengeSelected.settings?.allowedGear || [];
+      const free = (challengeSelected.gear_lock?.free as string[]) || challengeSelected.settings?.freeGear || [];
+      if (!gearOverrideRef.current) gearOverrideRef.current = gadgets;
+      setGadgets((prev) => {
+        const prevList = Array.isArray(prev) ? prev : [];
+        const allowedSet = new Set(allowed);
+        const freeSet = new Set(free);
+        const next: (Gadget | null)[] = [];
+        const pushUnique = (g: Gadget | null) => {
+          if (!g) return;
+          if (next.includes(g)) return;
+          next.push(g);
+        };
+        // Free gears are always granted first (up to 2 slots)
+        free.forEach((g) => pushUnique(g as Gadget));
+        // If allowed list exists, fill remaining slots with previously equipped allowed gears
+        if (allowedSet.size > 0) {
+          prevList.forEach((g) => {
+            if (!g) return;
+            if (!allowedSet.has(g)) return;
+            if (freeSet.has(g)) return;
+            pushUnique(g);
+          });
+        }
+        while (next.length < 2) next.push(null);
+        return next.slice(0, 2) as Gadget[];
+      });
+    }
 
     const seed = dailyRun ? seedFromDate(dateKey()) : Math.floor(Math.random() * 1_000_000_000);
     rngRef.current = mulberry32(seed);
@@ -1704,8 +2122,7 @@ export default function App() {
     doorLHoldRef.current = 0;
     doorRHoldRef.current = 0;
 
-    const presetList = MODE_PRESETS[modePreset] ?? [];
-    const roster = presetActive ? CHARACTERS_50.filter((c) => presetList.includes(c.id)) : selectedList;
+    const roster = selectedList;
 
     // spawn selected
     const runtime: RunningChar[] = roster.map((def) => makeRunningChar(def));
@@ -1731,6 +2148,22 @@ export default function App() {
   };
 
   const goMenu = () => {
+    if (screen === "PLAY" && score > 0 && !resultLoggedRef.current) {
+      resultLoggedRef.current = true;
+      submitScore(score, night);
+      if (challengeRunRef.current) {
+        const challengeId = challengeRunRef.current;
+        challengeRunRef.current = null;
+        apiPost("challenge_submit", { challengeId, score }).then(
+          () => fetchChallenges(),
+          () => {}
+        );
+      }
+    }
+    if (gearOverrideRef.current) {
+      setGadgets(gearOverrideRef.current);
+      gearOverrideRef.current = null;
+    }
     setJump({ visible: false });
     resultLoggedRef.current = false;
     setGenOpen(false);
@@ -1771,7 +2204,7 @@ export default function App() {
     if (whoId !== "system") {
       setIntel((prev) => {
         const next = { ...prev, [whoId]: Math.min(3, (prev[whoId] ?? 0) + 2) };
-        AsyncStorage.setItem(INTEL_KEY, JSON.stringify(next)).catch(() => {});
+        saveSettingsImmediate({ intel: next });
         return next;
       });
     }
@@ -1789,7 +2222,8 @@ export default function App() {
     try {
       if (value > best) {
         setBest(value);
-        await AsyncStorage.setItem(BEST_KEY, String(value));
+        saveSettingsImmediate({ best: value });
+        persistLocal(BEST_KEY, String(value));
       }
     } catch {}
   };
@@ -1807,7 +2241,7 @@ export default function App() {
     setAchievements((prev) => {
       if (prev[id]) return prev;
       const next = { ...prev, [id]: true };
-      AsyncStorage.setItem(ACHIEVE_KEY, JSON.stringify(next)).catch(() => {});
+      saveSettingsImmediate({ achievements: next });
       const def = ACHIEVEMENTS.find((a) => a.id === id);
       if (def) {
         setAchievementToast(`Achievement: ${def.name}`);
@@ -1860,16 +2294,56 @@ export default function App() {
     return data;
   };
 
+  const buildGuestTransfer = () => {
+    const localTotal = scoreLog.reduce((s, x) => s + x.score, 0);
+    const localBestNight = scoreLog.reduce((m, x) => Math.max(m, x.night), 0);
+    return {
+      settings: buildSettings(),
+      stats: {
+        best,
+        sessions: scoreLog.length,
+        highest_night: localBestNight,
+        total_score: localTotal,
+      },
+      seeds,
+    };
+  };
+
+  const rollCollectibleFor = (characterId: string) => {
+    const r = Math.random();
+    if (r < 0.001) return { characterId, rarity: "rainbow" };
+    if (r < 0.031) return { characterId, rarity: "mythic" };
+    if (r < 0.081) return { characterId, rarity: "gold" };
+    if (r < 0.151) return { characterId, rarity: "silver" };
+    if (r < 0.401) return { characterId, rarity: "normal" };
+    return null;
+  };
+
+  const buildCollectibleDrops = () => {
+    if (!selectedList.length) return [];
+    const pickChar = selectedList[Math.floor(Math.random() * selectedList.length)]?.id;
+    if (!pickChar) return [];
+    const drop = rollCollectibleFor(pickChar);
+    return drop ? [drop] : [];
+  };
+
   const submitScore = async (scoreVal: number, nightVal: number) => {
     if (!authToken) return;
     try {
+      const collectiblesPayload = buildCollectibleDrops();
       await fetch(apiUrl("score_submit"), {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
-        body: JSON.stringify({ score: scoreVal, night: nightVal }),
+        body: JSON.stringify({ score: scoreVal, night: nightVal, collectibles: collectiblesPayload }),
       });
       const st = await apiGet("stats_get");
       setUserStats(st?.stats ?? null);
+      if (collectiblesPayload.length) {
+        try {
+          const cl = await apiGet("collectible_list");
+          setCollectibles(Array.isArray(cl?.collectibles) ? cl.collectibles : []);
+        } catch {}
+      }
     } catch {}
   };
 
@@ -1877,6 +2351,7 @@ export default function App() {
     setAuthToken("");
     setAuthUser(null);
     setUserStats(null);
+    setSeasonBadges([]);
     setSeeds([]);
     setPosts([]);
     setProfileName("");
@@ -1899,7 +2374,8 @@ export default function App() {
   const spendCredits = (cost: number) => {
     setCredits((c) => {
       const next = Math.max(0, c - cost);
-      AsyncStorage.setItem(CREDITS_KEY, String(next)).catch(() => {});
+      saveSettingsImmediate({ credits: next });
+      persistLocal(CREDITS_KEY, String(next));
       return next;
     });
   };
@@ -1917,7 +2393,30 @@ export default function App() {
     customLevels,
     challenge,
     featuredAchievements,
+    badgesSelected,
+    pinnedPostId,
+    spinPity,
+    spinLog,
+    best,
+    credits,
+    scoreLog,
+    dailyScores,
+    adaptiveDeaths,
+    ghostByView,
+    intel,
+    achievements,
+    inventory,
+    gadgets,
+    skills,
+    contracts,
   });
+
+  const saveSettingsImmediate = (overrides?: Partial<ReturnType<typeof buildSettings>>) => {
+    if (!authToken || !settingsLoadedRef.current) return;
+    const base = buildSettings();
+    const payload = overrides ? { ...base, ...overrides } : base;
+    apiPost("settings_update", { settings: payload }).catch(() => {});
+  };
 
   const applySettings = (s: any) => {
     if (!s || typeof s !== "object") return;
@@ -1933,7 +2432,107 @@ export default function App() {
     if (s.customLevels && typeof s.customLevels === "object") setCustomLevels(s.customLevels);
     if (s.challenge && typeof s.challenge === "object") setChallenge((c) => ({ ...c, ...s.challenge }));
     if (Array.isArray(s.featuredAchievements)) setFeaturedAchievements(s.featuredAchievements);
+    if (Array.isArray(s.badgesSelected)) setBadgesSelected(s.badgesSelected);
+    if (typeof s.pinnedPostId === "string") setPinnedPostId(s.pinnedPostId);
+    if (Number.isFinite(s.spinPity)) setSpinPity(s.spinPity);
+    if (Array.isArray(s.spinLog)) setSpinLog(s.spinLog);
+    if (Number.isFinite(s.best)) setBest(s.best);
+    if (Number.isFinite(s.credits)) setCredits(s.credits);
+    if (Array.isArray(s.scoreLog)) setScoreLog(s.scoreLog);
+    if (Array.isArray(s.dailyScores)) setDailyScores(s.dailyScores);
+    if (Number.isFinite(s.adaptiveDeaths)) setAdaptiveDeaths(s.adaptiveDeaths);
+    if (s.ghostByView && typeof s.ghostByView === "object") setGhostByView(s.ghostByView);
+    if (s.intel && typeof s.intel === "object") setIntel(s.intel);
+    if (s.achievements && typeof s.achievements === "object") setAchievements(s.achievements);
+    if (s.inventory && typeof s.inventory === "object") setInventory(s.inventory);
+    if (Array.isArray(s.gadgets)) setGadgets(s.gadgets);
+    if (s.skills && typeof s.skills === "object") setSkills(s.skills);
+    if (Array.isArray(s.contracts)) setContractsSafe(s.contracts);
   };
+
+  const fetchChallenges = useCallback(async () => {
+    try {
+      const d = await apiGet("challenge_list");
+      setChallenges(d?.challenges ?? []);
+    } catch {}
+  }, []);
+
+  const createChallenge = useCallback(async () => {
+    if (!authToken) {
+      setChallengeStatus("Trebuie să fii logat.");
+      return;
+    }
+    const diffVal = Number(challengeDiff) || 0;
+    const rewardVal = challengeRewardGadget ? 10 : 0;
+    const gearPenalty = Math.max(0, challengeGearAllowed.length - 2) * 5 + challengeGearFree.length * 2;
+    const charPenalty = Math.min(120, challengeChars.length * 8);
+    const flagPenalty =
+      (challengeFlags.camera ? 0 : 8) +
+      (challengeFlags.doorL ? 0 : 10) +
+      (challengeFlags.doorR ? 0 : 10) +
+      (challengeFlags.music ? 0 : 6) +
+      (challengeFlags.vents ? 0 : 8);
+    const computedDifficulty = Math.min(200, diffVal + rewardVal + gearPenalty + charPenalty + flagPenalty);
+    const title = challengeTitle.trim();
+    if (!title) {
+      setChallengeStatus("Titlu lipsă");
+      return;
+    }
+    setChallengeStatus("...");
+    try {
+      await apiPost("challenge_create", {
+        title,
+        type: challengeType,
+        description: challengeDesc.trim(),
+        rewardCredits: 0,
+        rewardGadget: challengeRewardGadget || null,
+        presetName: challengePreset.trim(),
+        difficultyScore: computedDifficulty,
+        settings: {
+          font: challengeFont,
+          animatronics: challengeChars,
+          allowedGear: challengeGearAllowed,
+          freeGear: challengeGearFree,
+          flags: challengeFlags,
+          thumb: challengeThumb,
+          icon: challengeIcon,
+        },
+        gearLock:
+          challengeGearAllowed.length || challengeGearFree.length
+            ? { allowed: challengeGearAllowed, free: challengeGearFree }
+            : null,
+        pinned: challengePinned,
+        isPrivate: challengePrivate,
+        accessCode: challengePrivate ? challengeAccessCode.trim() : null,
+      });
+      setChallengeTitle("");
+      setChallengeDesc("");
+      setChallengeReward("0");
+      setChallengePreset("");
+      setChallengeDiff("50");
+      setChallengeGear("");
+      setChallengeGearAllowed([]);
+      setChallengeGearFree([]);
+      setChallengeChars([]);
+      setChallengePinned(false);
+      setChallengeRewardGadget("");
+      setChallengeFont("System");
+      setChallengeThumb("back1");
+      setChallengeIcon("back2");
+      setChallengeFlags({ camera: true, doorL: true, doorR: true, music: true, vents: true });
+      setChallengePrivate(false);
+      setChallengeAccessCode("");
+      setChallengeStatus("Creat!");
+      fetchChallenges();
+    } catch (e: any) {
+      setChallengeStatus(e?.message || "Eroare");
+    }
+  }, [authToken, challengeTitle, challengeDesc, challengeType, fetchChallenges]);
+
+  useEffect(() => {
+    if (!authToken) return;
+    fetchChallenges();
+  }, [authToken, fetchChallenges]);
 
   const kmpIndex = (text: string, pattern: string) => {
     if (!pattern) return 0;
@@ -2000,11 +2599,34 @@ export default function App() {
     const from = adminNoticeFrom.trim() || authUser?.username || "System";
     if (!title && !body) return;
     try {
-      await apiPost("admin_notify_all", { title, body, from });
+      const minutes = parseInt(adminNoticeMinutes, 10);
+      const expires_at = Number.isFinite(minutes) && minutes > 0 ? new Date(Date.now() + minutes * 60_000).toISOString() : null;
+      await apiPost("admin_notify_all", { title, body, from, expires_at });
       setAdminNoticeTitle("");
       setAdminNoticeBody("");
       setAdminNoticeFrom("");
+      setAdminNoticeMinutes("");
     } catch {}
+  };
+
+  const handleAdminSaveHomeFeed = async () => {
+    if (!authToken || !isAdminUser) return;
+    try {
+      const payload = (adminFeedDraft || []).map((it: any, idx: number) => ({
+        id: it?.id || `feed-${idx + 1}`,
+        tag: String(it?.tag || ""),
+        title: String(it?.title || ""),
+        desc: String(it?.desc || ""),
+        imageKey: it?.imageKey ? String(it.imageKey) : null,
+      }));
+      const d = await apiPost("home_feed_set", { items: payload });
+      const items = Array.isArray(d?.items) ? d.items : payload;
+      setHomeFeedItems(items);
+      setAdminFeedDraft(items);
+      setAdminStatus("Home feed updated.");
+    } catch (e) {
+      setAdminStatus("Home feed update failed.");
+    }
   };
 
   const openProfile = async (username: string) => {
@@ -2014,6 +2636,15 @@ export default function App() {
       }
       const d = await apiGet(`profile_full?username=${encodeURIComponent(username)}`);
       setProfileView(d?.profile ?? null);
+      if (d?.profile && authUser?.username && authUser.username === username) {
+        setProfileAvatar(d.profile.avatar_url || "");
+        setProfileBio(d.profile.bio || "");
+        setDisplayName(d.profile.display_name || d.profile.username || "");
+        setDisplayFont(d.profile.display_font || "System");
+        setDisplayColor(d.profile.display_color || "#EAF2FF");
+        setProfileBanner(d.profile.banner_url || "back1");
+        setProfileBackground(d.profile.background_url || "back1");
+      }
       setProfileStats(d?.stats ?? null);
       setProfileFollowers(d?.followers ?? 0);
       setProfileFollowing(d?.following ?? 0);
@@ -2021,6 +2652,7 @@ export default function App() {
       setProfileIsFriend(!!d?.is_friend);
       const feat = parseJson(d?.featured_achievements);
       setProfileFeatured(Array.isArray(feat) ? feat : []);
+      setProfilePolls(d?.polls ?? []);
       try {
         const p = await apiGet(`posts_user_list?username=${encodeURIComponent(username)}`);
         setProfilePosts(p?.posts ?? []);
@@ -2041,8 +2673,9 @@ export default function App() {
           setProfileFavoritePosts([]);
         }
       } else {
-        setProfileLikedPosts([]);
-        setProfileFavoritePosts([]);
+      setProfileLikedPosts([]);
+      setProfileFavoritePosts([]);
+      setProfilePolls([]);
       }
       setDmMessages([]);
       setDmDraft("");
@@ -2062,7 +2695,9 @@ export default function App() {
     return v;
   };
 
-  const rarityColor = (r: "common" | "rare" | "epic") => {
+  const rarityColor = (r: "common" | "rare" | "epic" | "legendary" | "mythic") => {
+    if (r === "mythic") return "#E879F9";
+    if (r === "legendary") return "#F59E0B";
     if (r === "epic") return "#C084FC";
     if (r === "rare") return "#60A5FA";
     return "#34D399";
@@ -2098,14 +2733,14 @@ export default function App() {
     if (!g) return;
     setInventory((prev) => {
       const next = { ...prev, [g]: (prev[g] ?? 0) + count };
-      AsyncStorage.setItem(INVENTORY_KEY, JSON.stringify(next)).catch(() => {});
+      saveSettingsImmediate({ inventory: next });
       return next;
     });
   };
 
   function setContractsSafe(next: Contract[]) {
     setContracts(next);
-    AsyncStorage.setItem(CONTRACT_KEY, JSON.stringify(next)).catch(() => {});
+    saveSettingsImmediate({ contracts: next });
   }
 
   function bumpContract(id: string, inc = 1) {
@@ -2117,7 +2752,7 @@ export default function App() {
         if (done) spendCredits(-c.reward);
         return { ...c, progress, done };
       });
-      AsyncStorage.setItem(CONTRACT_KEY, JSON.stringify(next)).catch(() => {});
+      saveSettingsImmediate({ contracts: next });
       return next;
     });
   }
@@ -2130,7 +2765,7 @@ export default function App() {
       if (have <= 0) return prev;
       ok = true;
       const next = { ...prev, [g]: have - 1 };
-      AsyncStorage.setItem(INVENTORY_KEY, JSON.stringify(next)).catch(() => {});
+      saveSettingsImmediate({ inventory: next });
       return next;
     });
     return ok;
@@ -2146,20 +2781,18 @@ export default function App() {
     spendCredits(cost);
     setSkills((prev) => {
       const next = { ...prev, [id]: level + 1 };
-      AsyncStorage.setItem(SKILL_KEY, JSON.stringify(next)).catch(() => {});
+      saveSettingsImmediate({ skills: next });
       return next;
     });
   };
 
-  const equipGadget = (g: Gadget) => {
+  const equipGadget = (g: Gadget, slot: number | null = null) => {
     setGadgets((prev) => {
       const next = [...prev];
-      const empty = next.findIndex((x) => !x);
-      if (empty >= 0) {
-        next[empty] = g;
-        return next;
-      }
-      next[0] = g;
+      const target = slot !== null ? slot : next.findIndex((x) => !x);
+      const idx = target !== -1 && target !== undefined ? target : 0;
+      next[idx] = g;
+      saveSettingsImmediate({ gadgets: next });
       return next;
     });
   };
@@ -2263,7 +2896,7 @@ export default function App() {
   };
 
   const doOverclock = () => {
-    if (overclockCd || systemDisabled) return;
+    if (overclockCd || systemDisabled || noOverclock) return;
     setOverclockCdUntil(now() + 12_000);
     setScanUntil(now() + 2000 + skills.scanRange * 200);
     setScanCdUntil(now() + 11_000);
@@ -2589,6 +3222,13 @@ export default function App() {
   };
 
   // ===== GAME LOOP =====
+  useEffect(() => {
+    const id = setInterval(() => {
+      setUiTick((v) => (v + 1) % 1000000);
+    }, 200);
+    return () => clearInterval(id);
+  }, []);
+
   useEffect(() => {
     if (screen !== "PLAY") {
       if (tickRef.current) {
@@ -2921,19 +3561,20 @@ export default function App() {
         const seen = charsRef.current.filter((rc) => rc.route[rc.idx] === camView.id).map((rc) => rc.def.id);
         if (seen.length) {
           setIntel((prev) => {
-            const next = { ...prev };
-            seen.forEach((id) => {
-              next[id] = Math.min(3, (next[id] ?? 0) + 1);
-            });
-            AsyncStorage.setItem(INTEL_KEY, JSON.stringify(next)).catch(() => {});
-            return next;
-          });
+        const next = { ...prev };
+        seen.forEach((id) => {
+          next[id] = Math.min(3, (next[id] ?? 0) + 1);
+        });
+        saveSettingsImmediate({ intel: next });
+        return next;
+      });
           lastIntelAtRef.current = t;
         }
       }
 
       // score tick
-      setScore((s) => s + Math.round(1 + nf));
+      const scoreMult = challengeMultiplier(challenge);
+      setScore((s) => s + Math.round((1 + nf) * scoreMult));
 
       resetSpamRef.current = Math.max(0, resetSpamRef.current - 0.02);
 
@@ -3297,19 +3938,22 @@ export default function App() {
     const entry = { score, night, who: jump.who ?? "Unknown", ts: now() };
     setScoreLog((prev) => {
       const next = [entry, ...prev].slice(0, 20);
-      AsyncStorage.setItem(SCORE_LOG_KEY, JSON.stringify(next)).catch(() => {});
+      persistLocal(SCORE_LOG_KEY, JSON.stringify(next));
+      saveSettingsImmediate({ scoreLog: next });
       return next;
     });
     if (!isWin) {
       setAdaptiveDeaths((d) => {
         const next = d + 1;
-        AsyncStorage.setItem(ADAPT_KEY, String(next)).catch(() => {});
+        persistLocal(ADAPT_KEY, String(next));
+        saveSettingsImmediate({ adaptiveDeaths: next });
         return next;
       });
     } else {
       setAdaptiveDeaths((d) => {
         const next = Math.max(0, d - 1);
-        AsyncStorage.setItem(ADAPT_KEY, String(next)).catch(() => {});
+        persistLocal(ADAPT_KEY, String(next));
+        saveSettingsImmediate({ adaptiveDeaths: next });
         return next;
       });
     }
@@ -3317,25 +3961,36 @@ export default function App() {
       setDailyScores((prev) => {
         const date = dateKey();
         const next = [{ date, score, night }, ...prev].slice(0, 20);
-        AsyncStorage.setItem(DAILY_KEY, JSON.stringify(next)).catch(() => {});
+        persistLocal(DAILY_KEY, JSON.stringify(next));
+        saveSettingsImmediate({ dailyScores: next });
         return next;
       });
     }
     const ghostNext = ghostBufferRef.current;
     if (ghostNext && Object.keys(ghostNext).length) {
       setGhostByView(ghostNext);
-      AsyncStorage.setItem(GHOST_KEY, JSON.stringify(ghostNext)).catch(() => {});
+      persistLocal(GHOST_KEY, JSON.stringify(ghostNext));
+      saveSettingsImmediate({ ghostByView: ghostNext });
     }
     if (!creditsAwardedRef.current) {
       const add = Math.max(1, Math.floor(score / 60));
       setCredits((c) => {
         const next = c + add;
-        AsyncStorage.setItem(CREDITS_KEY, String(next)).catch(() => {});
+        saveSettingsImmediate({ credits: next });
+        persistLocal(CREDITS_KEY, String(next));
         return next;
       });
       creditsAwardedRef.current = true;
     }
     submitScore(score, night);
+    if (challengeRunRef.current) {
+      const challengeId = challengeRunRef.current;
+      challengeRunRef.current = null;
+      apiPost("challenge_submit", { challengeId, score }).then(
+        () => fetchChallenges(),
+        () => {}
+      );
+    }
   }, [jump.visible]);
 
   const getCamPosition = (view: CameraView, charId: string): CamPos => {
@@ -3433,17 +4088,42 @@ export default function App() {
         delayPressIn={0}
         style={({ pressed }) => [
           styles.softBtn,
+          uiCompact && styles.softBtnCompact,
+          ultraCompact && styles.softBtnUltra,
+          ultraCompact ? { width: "100%" } : uiCompact ? { width: `${Math.floor(100 / dockCols)}%` } : null,
           { backgroundColor: bg, borderColor: border, opacity: hardDisabled ? 0.45 : pressed ? 0.82 : 1 },
           pressed && styles.softBtnPressed,
         ]}
       >
-        <Text style={styles.softBtnTitle}>{title}</Text>
-        {!!sub && <Text style={styles.softBtnSub}>{sub}</Text>}
+        <Text style={[styles.softBtnTitle, uiCompact && styles.softBtnTitleCompact, ultraCompact && styles.softBtnTitleUltra]}>{title}</Text>
+        {!!sub && <Text style={[styles.softBtnSub, uiCompact && styles.softBtnSubCompact, ultraCompact && styles.softBtnSubUltra]}>{sub}</Text>}
       </Pressable>
     );
   };
 
   const isAdminUser = authUser?.role === "admin";
+  const badgeUnlocked = useMemo(() => {
+    const earlyAccessActive = new Date() < new Date("2026-03-01T00:00:00");
+    return {
+      verified: !!authUser?.verified,
+      moderator: isAdminUser,
+      early_bird: earlyAccessActive,
+      bolojan: true,
+      nicusor: true,
+      rose: (scoreLog?.length ?? 0) > 0 || (userStats?.sessions ?? 0) > 0,
+      season_top1: seasonBadges.includes("season_top1"),
+      season_top2: seasonBadges.includes("season_top2"),
+      season_top3: seasonBadges.includes("season_top3"),
+    } as Record<string, boolean>;
+  }, [authUser?.verified, isAdminUser, scoreLog, userStats, seasonBadges]);
+  const badgeMeta = useMemo(
+    () =>
+      BADGES.reduce((acc, b) => {
+        acc[b.id] = { id: b.id, name: b.name, type: b.type, value: b.value };
+        return acc;
+      }, {} as Record<string, { id: string; name: string; type: "emoji" | "image" | "icon"; value: any }>),
+    []
+  );
 
   const handleCreatePost = async () => {
     if (!authToken || !postBody.trim()) return;
@@ -3457,6 +4137,51 @@ export default function App() {
       setPostBody("");
       const d = await apiGet("posts_list");
       setPosts(d?.posts ?? []);
+    } catch {}
+  };
+
+  const handleAdminDeleteChallenge = async (challengeId: string) => {
+    if (!authToken || !isAdminUser) return;
+    try {
+      await apiPost("admin_delete_challenge", { challengeId });
+      fetchChallenges();
+    } catch {}
+  };
+
+  const handleCreatePoll = async (question: string, options: string[], pollType: "single" | "multi" | "quiz", correctIndex: number | null) => {
+    if (!authToken) {
+      alert("Trebuie să fii logat pentru poll.");
+      return;
+    }
+    const q = (question || "").trim();
+    const opts = (options || []).map((o) => String(o).trim()).filter(Boolean);
+    if (!q || opts.length < 2) return;
+    try {
+      await apiPost("poll_create", { question: q, options: opts, pollType, correctIndex });
+      const d = await apiGet("poll_list");
+      setPolls(d?.polls ?? []);
+    } catch (e: any) {
+      alert(e?.message || "Eroare poll");
+    }
+  };
+
+  const handleVotePoll = async (pollId: string, optionIndex: number) => {
+    if (!authToken) return alert("Trebuie să fii logat pentru a vota.");
+    try {
+      await apiPost("poll_vote", { pollId, optionIndex });
+      const d = await apiGet("poll_list");
+      setPolls(d?.polls ?? []);
+    } catch (e: any) {
+      alert(e?.message || "Eroare vot");
+    }
+  };
+
+  const handleDeletePoll = async (pollId: string) => {
+    if (!authToken || !isAdminUser) return;
+    try {
+      await apiPost("admin_delete_poll", { pollId });
+      const d = await apiGet("poll_list");
+      setPolls(d?.polls ?? []);
     } catch {}
   };
 
@@ -3563,7 +4288,7 @@ export default function App() {
       const next = [item, ...prev.filter((r) => r.id !== item.id)]
         .sort((a, b) => b.ts - a.ts)
         .slice(0, 12);
-      AsyncStorage.setItem(RECENTS_KEY, JSON.stringify(next)).catch(() => {});
+      persistLocal(RECENTS_KEY, JSON.stringify(next));
       return next;
     });
   };
@@ -3571,7 +4296,7 @@ export default function App() {
   const removeRecent = (id: string) => {
     setRecents((prev) => {
       const next = prev.filter((r) => r.id !== id);
-      AsyncStorage.setItem(RECENTS_KEY, JSON.stringify(next)).catch(() => {});
+      persistLocal(RECENTS_KEY, JSON.stringify(next));
       return next;
     });
   };
@@ -3700,12 +4425,14 @@ export default function App() {
     const danger = warn || v <= 20;
     const col = danger ? bad : good;
     return (
-      <View style={styles.barRow}>
-        <Text style={styles.barLabel}>{label}</Text>
-        <View style={styles.barTrack}>
-          <View style={[styles.barFill, { width: `${v}%`, backgroundColor: col }]} />
+      <View style={[styles.barRow, compactHud && styles.barRowCompact, ultraCompact && styles.barRowUltra]}>
+        <Text style={[styles.barLabel, compactHud && styles.barLabelCompact, ultraCompact && styles.barLabelUltra]}>{label}</Text>
+        <View style={[styles.barTrack, compactHud && styles.barTrackCompact, ultraCompact && styles.barTrackUltra]}>
+          <View style={[styles.barFill, compactHud && styles.barFillCompact, ultraCompact && styles.barFillUltra, { width: `${v}%`, backgroundColor: col }]} />
         </View>
-        <Text style={[styles.barVal, danger && { color: "#FFB86B" }]}>{rightText ?? `${Math.round(v)}%`}</Text>
+        <Text style={[styles.barVal, compactHud && styles.barValCompact, ultraCompact && styles.barValUltra, danger && { color: "#FFB86B" }]}>
+          {rightText ?? `${Math.round(v)}%`}
+        </Text>
       </View>
     );
   };
@@ -3753,11 +4480,20 @@ export default function App() {
           try {
             setAuthError("");
             setAuthLoading(true);
-            const data = await authRequest(registerMode ? "auth_register" : "auth_login", {
-              username: loginUser.trim(),
-              email: loginEmail.trim(),
-              password: loginPass,
-            });
+            const body =
+              registerMode && !authToken
+                ? {
+                    username: loginUser.trim(),
+                    email: loginEmail.trim(),
+                    password: loginPass,
+                    guestTransfer: buildGuestTransfer(),
+                  }
+                : {
+                    username: loginUser.trim(),
+                    email: loginEmail.trim(),
+                    password: loginPass,
+                  };
+            const data = await authRequest(registerMode ? "auth_register" : "auth_login", body);
             const token = data?.token;
             const user = data?.user;
             if (token) {
@@ -3798,54 +4534,180 @@ export default function App() {
           <ScrollView contentContainerStyle={styles.socialWrap}>
             <View style={[styles.scoreCard, shadow as any]}>
               <Text style={styles.scoreTitle}>Scoreboard</Text>
-              <Text style={styles.scoreSub}>Ultimele 20 de runde</Text>
+              
+<Text style={styles.scoreSub}>Alege leaderboard: scor / coins / challenge-uri</Text>
+              <View style={styles.scoreTabs}>
+                {[
+                  { id: "score", label: "Score" },
+                  { id: "coins", label: "Coins" },
+                  { id: "challenges", label: "Challenges" },
+                ].map((t) => {
+                  const active = scoreTab === t.id;
+                  return (
+                    <Pressable
+                      key={t.id}
+                      onPress={() => setScoreTab(t.id as any)}
+                      style={[styles.scoreTabBtn, active && styles.scoreTabBtnActive]}
+                    >
+                      <Text style={[styles.scoreTabText, active && styles.scoreTabTextActive]}>{t.label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
 
-              <View style={{ height: 12 }} />
-              {scoreLog.length === 0 && <Text style={styles.scoreEmpty}>Niciun scor încă.</Text>}
-              {scoreLog.map((it, i) => (
-                <View key={`${it.ts}-${i}`} style={styles.scoreRow}>
-                  <Text style={styles.scoreIdx}>#{i + 1}</Text>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.scoreName}>{it.who}</Text>
-                    <Text style={styles.scoreMeta}>Night {it.night}</Text>
-                  </View>
-                  <Text style={styles.scoreVal}>{it.score}</Text>
-                </View>
-              ))}
+              {scoreTab === "score" && (
+                <>
+                  <View style={{ height: 12 }} />
+                  {scoreLog.length === 0 && <Text style={styles.scoreEmpty}>Niciun scor ?nc?.</Text>}
+                  {scoreLog.map((it, i) => (
+                    <View key={`${it.ts}-${i}`} style={styles.scoreRow}>
+                      <Text style={styles.scoreIdx}>#{i + 1}</Text>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.scoreName}>{it.who}</Text>
+                        <Text style={styles.scoreMeta}>Night {it.night}</Text>
+                      </View>
+                      <Text style={styles.scoreVal}>{it.score}</Text>
+                    </View>
+                  ))}
 
-              <View style={{ height: 14 }} />
-              <Text style={styles.scoreSub}>Daily Run (astăzi)</Text>
-              <View style={{ height: 6 }} />
-              {todayScores.length === 0 && <Text style={styles.scoreEmpty}>Niciun scor daily.</Text>}
-              {todayScores.map((it, i) => (
-                <View key={`daily-${it.date}-${i}`} style={styles.scoreRow}>
-                  <Text style={styles.scoreIdx}>#{i + 1}</Text>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.scoreName}>Daily Seed</Text>
-                    <Text style={styles.scoreMeta}>Night {it.night}</Text>
-                  </View>
-                  <Text style={styles.scoreVal}>{it.score}</Text>
-                </View>
-              ))}
+                  <View style={{ height: 14 }} />
+                  <Text style={styles.scoreSub}>Daily Run (ast?zi)</Text>
+                  <View style={{ height: 6 }} />
+                  {todayScores.length === 0 && <Text style={styles.scoreEmpty}>Niciun scor daily.</Text>}
+                  {todayScores.map((it, i) => (
+                    <View key={`daily-${it.date}-${i}`} style={styles.scoreRow}>
+                      <Text style={styles.scoreIdx}>#{i + 1}</Text>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.scoreName}>Daily Seed</Text>
+                        <Text style={styles.scoreMeta}>Night {it.night}</Text>
+                      </View>
+                      <Text style={styles.scoreVal}>{it.score}</Text>
+                    </View>
+                  ))}
 
-              <View style={{ height: 14 }} />
-              <Text style={styles.scoreSub}>Leaderboard (global)</Text>
-              <View style={{ height: 6 }} />
-              {remoteLoading && <Text style={styles.scoreEmpty}>Se încarcă...</Text>}
-              {!remoteLoading && remoteScores.length === 0 && <Text style={styles.scoreEmpty}>Niciun scor global.</Text>}
-              {remoteScores.map((it, i) => (
-                <View key={`remote-${it.username}-${i}`} style={styles.scoreRow}>
-                  <Text style={styles.scoreIdx}>#{i + 1}</Text>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.scoreName}>{it.username}</Text>
-                    <Text style={styles.scoreMeta}>Night {it.night}</Text>
-                  </View>
-                  <Text style={styles.scoreVal}>{it.score}</Text>
-                </View>
-              ))}
+                  <View style={{ height: 14 }} />
+                  <Text style={styles.scoreSub}>Leaderboard (global)</Text>
+                  <View style={{ height: 10 }} />
+                  {remoteLoading && <Text style={styles.scoreEmpty}>Se ?ncarc?...</Text>}
+                  {!remoteLoading && remoteScores.length === 0 && <Text style={styles.scoreEmpty}>Niciun scor global.</Text>}
+                  {!remoteLoading && remoteScores.length >= 1 && (
+                    <View style={styles.podium}>
+                      {[1, 0, 2].map((idxPos, col) => {
+                        const it = remoteScores[idxPos];
+                        if (!it) return <View key={`pod-empty-${col}`} style={styles.podiumCol} />;
+                        const place = idxPos + 1;
+                        return (
+                          <View key={`pod-${place}`} style={[styles.podiumCol, styles[`pod${place}`] as any]}>
+                            <Text style={styles.podPlace}>#{place}</Text>
+                            <Text style={styles.podName}>{it.username}</Text>
+                            <Text style={styles.podScore}>{it.score}</Text>
+                            <Text style={styles.podMeta}>Night {it.night}</Text>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  )}
+                  {!remoteLoading &&
+                    remoteScores.slice(3).map((it, i) => (
+                      <View key={`remote-${it.username}-${i}`} style={styles.scoreRow}>
+                        <Text style={styles.scoreIdx}>#{i + 4}</Text>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.scoreName}>{it.username}</Text>
+                          <Text style={styles.scoreMeta}>Night {it.night}</Text>
+                        </View>
+                        <Text style={styles.scoreVal}>{it.score}</Text>
+                      </View>
+                    ))}
 
-              <View style={{ height: 10 }} />
-              <SoftButton title="ÎNAPOI" onPress={() => setScreen("MENU")} />
+                  <View style={{ height: 14 }} />
+                  <Text style={styles.scoreSub}>Ranked Season {seasonId || "(loading...)"}</Text>
+                  <View style={{ height: 6 }} />
+                  {seasonScores.length === 0 && <Text style={styles.scoreEmpty}>Niciun scor sezon.</Text>}
+                  {seasonScores.slice(0, 5).map((it, i) => (
+                    <View key={`season-${it.username}-${i}`} style={styles.scoreRow}>
+                      <Text style={styles.scoreIdx}>#{i + 1}</Text>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.scoreName}>{it.username}</Text>
+                        <Text style={styles.scoreMeta}>Night {it.night}</Text>
+                      </View>
+                      <Text style={styles.scoreVal}>{it.score}</Text>
+                    </View>
+                  ))}
+                </>
+              )}
+
+              {scoreTab === "coins" && (
+                <>
+                  <View style={{ height: 12 }} />
+                  <Text style={styles.scoreSub}>Leaderboard Coins</Text>
+                  <View style={{ height: 10 }} />
+                  {remoteCoins.length === 0 && <Text style={styles.scoreEmpty}>Niciun scor coins.</Text>}
+                  {remoteCoins.length >= 1 && (
+                    <View style={styles.podium}>
+                      {[1, 0, 2].map((idxPos, col) => {
+                        const it = remoteCoins[idxPos];
+                        if (!it) return <View key={`podc-empty-${col}`} style={styles.podiumCol} />;
+                        const place = idxPos + 1;
+                        return (
+                          <View key={`podc-${place}`} style={[styles.podiumCol, styles[`pod${place}`] as any]}>
+                            <Text style={styles.podPlace}>#{place}</Text>
+                            <Text style={styles.podName}>{it.username}</Text>
+                            <Text style={styles.podScore}>{it.credits}</Text>
+                            <Text style={styles.podMeta}>Coins</Text>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  )}
+                  {remoteCoins.slice(3).map((it, i) => (
+                    <View key={`coins-${it.username}-${i}`} style={styles.scoreRow}>
+                      <Text style={styles.scoreIdx}>#{i + 4}</Text>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.scoreName}>{it.username}</Text>
+                        <Text style={styles.scoreMeta}>Coins</Text>
+                      </View>
+                      <Text style={styles.scoreVal}>{it.credits}</Text>
+                    </View>
+                  ))}
+                </>
+              )}
+
+              {scoreTab === "challenges" && (
+                <>
+                  <View style={{ height: 12 }} />
+                  <Text style={styles.scoreSub}>Leaderboard Challenges</Text>
+                  <View style={{ height: 10 }} />
+                  {remoteChallenges.length === 0 && <Text style={styles.scoreEmpty}>Niciun challenge completat.</Text>}
+                  {remoteChallenges.length >= 1 && (
+                    <View style={styles.podium}>
+                      {[1, 0, 2].map((idxPos, col) => {
+                        const it = remoteChallenges[idxPos];
+                        if (!it) return <View key={`podch-empty-${col}`} style={styles.podiumCol} />;
+                        const place = idxPos + 1;
+                        return (
+                          <View key={`podch-${place}`} style={[styles.podiumCol, styles[`pod${place}`] as any]}>
+                            <Text style={styles.podPlace}>#{place}</Text>
+                            <Text style={styles.podName}>{it.username}</Text>
+                            <Text style={styles.podScore}>{it.count}</Text>
+                            <Text style={styles.podMeta}>Completed</Text>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  )}
+                  {remoteChallenges.slice(3).map((it, i) => (
+                    <View key={`ch-${it.username}-${i}`} style={styles.scoreRow}>
+                      <Text style={styles.scoreIdx}>#{i + 4}</Text>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.scoreName}>{it.username}</Text>
+                        <Text style={styles.scoreMeta}>Completed</Text>
+                      </View>
+                      <Text style={styles.scoreVal}>{it.count}</Text>
+                    </View>
+                  ))}
+                </>
+              )}
+<SoftButton title="ÎNAPOI" onPress={() => setScreen("MENU")} />
             </View>
           </ScrollView>
         </ImageBackground>
@@ -3961,6 +4823,8 @@ export default function App() {
                 </View>
                 <View style={styles.workshopHeroActions}>
                   <SoftButton title="BACK" onPress={() => setScreen("MENU")} />
+                  <SoftButton title={spinRunning ? "SPINNING..." : "LUCKY SPIN"} disabled={spinRunning} onPress={runSpin} />
+                  {spinResult && <Text style={styles.spinResult}>{spinResult}</Text>}
                 </View>
               </View>
 
@@ -4001,30 +4865,105 @@ export default function App() {
                 </View>
 
               <View style={styles.workshopSection}>
-                <Text style={styles.sectionTitle}>Inventory</Text>
-                <View style={styles.cardGrid}>
-                  {GADGET_SHOP.map((g) => {
-                      const count = inventory[g.id] ?? 0;
-                      const glow = rarityColor(g.rarity);
-                      return (
-                        <View key={`inv-${g.id}`} style={[styles.itemCard, styles.itemCardCompact, { borderColor: `${glow}55`, shadowColor: glow }]}>
-                          <View style={[styles.itemIcon, { backgroundColor: `${glow}22`, borderColor: `${glow}66` }]} />
-                          <View style={{ flex: 1 }}>
-                            <Text style={styles.itemTitle}>{g.name}</Text>
-                            <Text style={styles.itemDesc}>Owned: {count}</Text>
-                          </View>
-                          <SoftButton
-                            title={count > 0 ? "EQUIP" : "EMPTY"}
-                            disabled={count <= 0}
+                <Text style={styles.sectionTitle}>Loadout</Text>
+                <View style={styles.loadoutRow}>
+                  {[0, 1].map((slot) => {
+                    const g = gadgets[slot];
+                    const glow = g ? rarityColor((GADGET_SHOP.find((x) => x.id === g)?.rarity as any) || "common") : "rgba(255,255,255,0.25)";
+                    const selected = slot === equipPick?.slot;
+                    return (
+                      <Pressable
+                        key={`slot-${slot}`}
+                        style={[
+                          styles.slotCard,
+                          { borderColor: glow },
+                          selected && { shadowColor: glow, shadowOpacity: 0.7, shadowRadius: 14 },
+                        ]}
+                        onPress={() => {
+                          if (equipPick && equipPick.id) {
+                            setGadgets((prev) => {
+                              const next = [...prev] as Gadget[];
+                              next[slot] = equipPick.id;
+                              saveSettingsImmediate({ gadgets: next });
+                              return next;
+                            });
+                            setEquipPick(null);
+                          }
+                        }}
+                      >
+                        <Text style={styles.slotLabel}>Slot {slot + 1}</Text>
+                        <Text style={styles.slotName}>{g ? gadgetLabel(g) : "Empty"}</Text>
+                        {selected && <Text style={styles.slotHint}>Tap inventory to assign</Text>}
+                        {g && (
+                          <Pressable
+                            style={styles.slotClear}
                             onPress={() => {
-                              if (count <= 0) return;
-                              if (consumeInventory(g.id)) equipGadget(g.id);
+                              setGadgets((prev) => {
+                                const next = [...prev] as Gadget[];
+                                next[slot] = null;
+                                saveSettingsImmediate({ gadgets: next });
+                                return next;
+                              });
                             }}
-                          />
-                        </View>
-                      );
+                          >
+                            <Text style={styles.slotClearTxt}>Remove</Text>
+                          </Pressable>
+                        )}
+                      </Pressable>
+                    );
                   })}
                 </View>
+
+                <Text style={[styles.sectionTitle, { marginTop: 10 }]}>Inventory</Text>
+                <View style={styles.cardGrid}>
+                  {GADGET_SHOP.map((g) => {
+                    const count = inventory[g.id] ?? 0;
+                    const glow = rarityColor(g.rarity);
+                    const picked = equipPick && equipPick.id === g.id;
+                    const emptySlot = gadgets.findIndex((s) => !s);
+                    return (
+                      <Pressable
+                        key={`inv-${g.id}`}
+                        style={[
+                          styles.itemCard,
+                          styles.itemCardCompact,
+                          { borderColor: `${glow}55`, shadowColor: glow },
+                          picked && { borderColor: glow, shadowOpacity: 0.8 },
+                        ]}
+                        onPress={() => {
+                          if (count <= 0) return;
+                          if (emptySlot !== -1) {
+                            setGadgets((prev) => {
+                              const next = [...prev] as Gadget[];
+                              next[emptySlot] = g.id as Gadget;
+                              saveSettingsImmediate({ gadgets: next });
+                              return next;
+                            });
+                            setEquipPick(null);
+                          } else {
+                            setEquipPick({ id: g.id as Gadget, slot: null });
+                          }
+                        }}
+                        onLongPress={() => {
+                          if (count <= 0) return;
+                          setEquipPick({ id: g.id as Gadget, slot: null });
+                        }}
+                      >
+                        <View style={[styles.itemIcon, { backgroundColor: `${glow}22`, borderColor: `${glow}66` }]} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.itemTitle}>{g.name}</Text>
+                          <Text style={styles.itemDesc}>Owned: {count}</Text>
+                        </View>
+                        <View style={[styles.rarityPill, { borderColor: glow }]}>
+                          <Text style={[styles.rarityTxt, { color: glow }]}>{g.rarity.toUpperCase()}</Text>
+                        </View>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                {equipPick && (
+                  <Text style={styles.pickHint}>Select a slot above to equip {gadgetLabel(equipPick.id)}</Text>
+                )}
               </View>
 
               <View style={styles.workshopSection}>
@@ -4049,9 +4988,10 @@ export default function App() {
                 })}
               </View>
 
-              <View style={styles.workshopSection}>
-                <Text style={styles.sectionTitle}>Loadout</Text>
-                <View style={styles.loadoutRow}>
+              {false && (
+                <View style={styles.workshopSection}>
+                  <Text style={styles.sectionTitle}>Loadout</Text>
+                  <View style={styles.loadoutRow}>
                     <View style={styles.loadoutCard}>
                       <Text style={styles.shopMeta}>Slot 1</Text>
                       <Text style={styles.shopSlotVal}>{gadgets[0] ? gadgetLabel(gadgets[0]) : "Empty"}</Text>
@@ -4064,7 +5004,8 @@ export default function App() {
                     </View>
                   </View>
                 </View>
-              </View>
+              )}
+              </View> {/* end workshopMain */}
             </View>
           </ScrollView>
         </ImageBackground>
@@ -4168,11 +5109,82 @@ export default function App() {
                 multiline
               />
               <View style={{ height: 8 }} />
+              <Text style={styles.loginLabel}>Display name</Text>
+              <TextInput
+                value={displayName}
+                onChangeText={setDisplayName}
+                placeholder="Cum vrei să apari"
+                placeholderTextColor="rgba(220,220,230,0.45)"
+                style={styles.loginInput}
+              />
+              <Text style={styles.loginLabel}>Font</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
+                {DISPLAY_FONTS.map((f) => {
+                  const on = displayFont === f;
+                  return (
+                    <Pressable
+                      key={f}
+                      onPress={() => setDisplayFont(f)}
+                      style={[styles.fontChip, on && styles.fontChipOn]}
+                    >
+                      <Text style={[styles.fontChipTxt, { fontFamily: f === "System" ? undefined : f }]}>{f}</Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+              <Text style={styles.loginLabel}>Name color (hex)</Text>
+              <TextInput
+                value={displayColor}
+                onChangeText={setDisplayColor}
+                placeholder="#EAF2FF"
+                placeholderTextColor="rgba(220,220,230,0.45)"
+                style={styles.loginInput}
+              />
+              <Text style={styles.loginLabel}>Banner</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
+                {Object.keys(IMG.rooms).map((k) => {
+                  const on = profileBanner === k;
+                  return (
+                    <Pressable
+                      key={k}
+                      onPress={() => setProfileBanner(k as any)}
+                      style={[styles.bannerTile, on && styles.bannerTileOn]}
+                    >
+                      <Image source={IMG.rooms[k]} style={styles.bannerImg} />
+                      <Text style={styles.bannerLabel}>{k}</Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+              <Text style={styles.loginLabel}>Background</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
+                {Object.keys(IMG.rooms).map((k) => {
+                  const on = profileBackground === k;
+                  return (
+                    <Pressable
+                      key={`bg-${k}`}
+                      onPress={() => setProfileBackground(k as any)}
+                      style={[styles.bannerTile, on && styles.bannerTileOn]}
+                    >
+                      <Image source={IMG.rooms[k]} style={styles.bannerImg} />
+                      <Text style={styles.bannerLabel}>{k}</Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
               <SoftButton
                 title="SAVE PROFILE"
                 onPress={async () => {
                   try {
-                    await apiPost("profile_update", { avatarUrl: profileAvatar, bio: profileBio });
+                    await apiPost("profile_update", {
+                      avatarUrl: profileAvatar,
+                      bio: profileBio,
+                      displayName,
+                      displayFont,
+                      displayColor,
+                      bannerUrl: profileBanner,
+                      backgroundUrl: profileBackground,
+                    });
                   } catch {}
                 }}
                 disabled={!authToken}
@@ -4437,6 +5449,7 @@ export default function App() {
           feedSearch={feedSearch}
           postBody={postBody}
           posts={posts}
+          polls={polls}
           socialLoading={socialLoading}
           profileResults={profileResults}
           commentsByPost={commentsByPost}
@@ -4445,14 +5458,19 @@ export default function App() {
           authToken={authToken}
           authUserId={authUser?.id}
           authUsername={authUser?.username}
+          authBadges={badgesSelected}
           isWide={isWide}
           isMid={isMid}
           isAdmin={isAdminUser}
+          badgeMeta={badgeMeta}
           recents={recents}
           onProfileSearchChange={setProfileSearch}
           onFeedSearchChange={setFeedSearch}
           onPostBodyChange={setPostBody}
           onCreatePost={handleCreatePost}
+          onCreatePoll={handleCreatePoll}
+          onVotePoll={handleVotePoll}
+          onDeletePoll={handleDeletePoll}
           onFollowToggle={handleFollowToggle}
           onLikeToggle={handleLikeToggle}
           onFavoriteToggle={handleFavoriteToggle}
@@ -4479,7 +5497,882 @@ export default function App() {
     );
   }
 
+  if (screen === "SPIN") {
+    const itemW = 150;
+  const startAnimatedSpin = () => {
+    if (spinRunning) return;
+    const now = Date.now();
+    if (spinCooldownUntil.current && now < spinCooldownUntil.current) {
+      setSpinResult("Așteaptă 3s între spin-uri");
+      return;
+    }
+    if (now - lastSpinTs.current < 500) return; // debounce accidental double tap
+    if (credits < spinBet) {
+      setSpinResult("Insufficient credits");
+      return;
+    }
+    lastSpinTs.current = now;
+    // pick an index directly (keeps visual stop in sync with reward)
+      const weights = spinStrip.map((r) => {
+        const base =
+          r.rarity === "mythic" ? 1 : r.rarity === "legendary" ? 2 : r.rarity === "epic" ? 4 : r.rarity === "rare" ? 8 : 12;
+        const boost = 1 + spinBet / 200; // higher bet => higher chance high tiers
+        const high = r.rarity === "mythic" || r.rarity === "legendary" ? boost : 1;
+        return base * high;
+      });
+      const total = weights.reduce((a, b) => a + b, 0);
+      let roll = rand() * total;
+      let pickIndex = 0;
+      for (let i = 0; i < spinStrip.length; i++) {
+        if ((roll -= weights[i]) <= 0) {
+          pickIndex = i;
+          break;
+        }
+      }
+      const reward = spinStrip[pickIndex];
+      setCredits((c) => {
+        const next = Math.max(0, c - spinBet);
+        saveSettingsImmediate({ credits: next });
+        return next;
+      });
+      // add extra distance before landing for visual spin
+      const loopOffset = Math.floor(spinStrip.length * 0.5);
+      const targetIndex = loopOffset + pickIndex;
+      const target = -(targetIndex * itemW) + 240;
+      spinTargetRef.current = target;
+      spinAnim.setValue(0);
+      Animated.timing(spinAnim, {
+        toValue: target,
+        duration: 5200,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }).start(() => {
+        setSpinHitId(reward.id);
+        runSpin(reward, spinBet);
+      });
+    };
+    return (
+      <SafeAreaView style={styles.root}>
+        <StatusBar barStyle="light-content" />
+        <ImageBackground source={IMG.rooms.holprincipal} style={styles.bg} resizeMode="cover">
+          <View style={styles.overlayStrong} />
+          <View style={styles.spinWrap}>
+            <Text style={styles.spinTitle}>Lucky Spin</Text>
+            <Text style={styles.spinSub}>Rulează roata pentru credite & gadgeturi</Text>
+
+            <View style={styles.spinWindow}>
+              <Animated.View style={{ flexDirection: "row", transform: [{ translateX: spinAnim }] }}>
+                {spinStrip.map((r, i) => {
+                  const glow = rarityColor(r.rarity as any);
+                  return (
+                    <View
+                      key={`${r.id}-${i}`}
+                      style={[
+                        styles.spinItem,
+                        { width: itemW, borderColor: `${glow}66` },
+                        spinHitId === r.id && { transform: [{ scale: 1.08 }], shadowColor: glow, shadowOpacity: 0.8, shadowRadius: 14 },
+                      ]}
+                    >
+                      <Text style={[styles.spinItemName, { color: glow }]}>{r.label}</Text>
+                      <Text style={styles.spinItemRarity}>{r.rarity.toUpperCase()}</Text>
+                    </View>
+                  );
+                })}
+              </Animated.View>
+              <View style={styles.spinIndicator} />
+            </View>
+
+            <View style={styles.spinActions}>
+              <SoftButton title="Back" onPress={() => setScreen("MENU")} />
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                <SoftButton title="−" onPress={() => setSpinBet((b) => Math.max(25, b - 25))} />
+                <Text style={styles.spinBetText}>Bet: {spinBet}</Text>
+                <SoftButton title="+" onPress={() => setSpinBet((b) => Math.min(credits, b + 25))} />
+                <SoftButton title="MAX" onPress={() => setSpinBet(Math.max(25, credits))} />
+                <SoftButton
+                  title="SKIP"
+                  onPress={() => {
+                    if (spinRunning) {
+                      spinAnim.stopAnimation((cur) => {
+                        Animated.timing(spinAnim, {
+                          toValue: spinTargetRef.current || cur || 0,
+                          duration: 600,
+                          easing: Easing.out(Easing.cubic),
+                          useNativeDriver: true,
+                        }).start();
+                      });
+                    }
+                  }}
+                  disabled={!spinRunning}
+                />
+              </View>
+              <SoftButton title={spinRunning ? "Spinning..." : "Spin"} onPress={startAnimatedSpin} disabled={spinRunning} />
+            </View>
+            <Text style={styles.spinPity}>Pity: {spinPity}</Text>
+            {spinResult && <Text style={styles.spinResult}>{spinResult}</Text>}
+          </View>
+        </ImageBackground>
+      </SafeAreaView>
+    );
+  }
+
+  if (screen === "ADMIN") {
+    if (!isAdminUser) {
+      return (
+        <SafeAreaView style={styles.root}>
+          <StatusBar barStyle="light-content" />
+          <ImageBackground source={IMG.rooms[bgPick]} style={styles.bg} resizeMode="cover">
+            <View style={styles.overlayStrong} />
+            <View style={[styles.socialWrap, { flex: 1, justifyContent: "center" }]}>
+              <View style={[styles.statsCard, shadow as any]}>
+                <Text style={styles.scoreTitle}>Admin Panel</Text>
+                <Text style={styles.scoreSub}>Acces doar pentru admini.</Text>
+                <View style={{ height: 12 }} />
+                <SoftButton title="Înapoi" onPress={() => setScreen("MENU")} />
+              </View>
+            </View>
+          </ImageBackground>
+        </SafeAreaView>
+      );
+    }
+    return (
+      <SafeAreaView style={styles.root}>
+        <StatusBar barStyle="light-content" />
+        <ImageBackground source={IMG.rooms[bgPick]} style={styles.bg} resizeMode="cover">
+          <View style={styles.overlayStrong} />
+          <ScrollView contentContainerStyle={styles.socialWrap}>
+            <View style={[styles.statsCard, shadow as any]}>
+              <Text style={styles.scoreTitle}>Admin Panel</Text>
+              <Text style={styles.scoreSub}>Doar pentru admini</Text>
+              <View style={{ height: 12 }} />
+
+              <Text style={styles.sectionTitle}>System notice</Text>
+              <Text style={styles.loginLabel}>Title</Text>
+              <TextInput
+                value={adminNoticeTitle}
+                onChangeText={setAdminNoticeTitle}
+                placeholder="FNAP system update"
+                placeholderTextColor="rgba(220,220,230,0.45)"
+                style={styles.loginInput}
+              />
+              <Text style={styles.loginLabel}>Body</Text>
+              <TextInput
+                value={adminNoticeBody}
+                onChangeText={setAdminNoticeBody}
+                placeholder="Mesaj pentru toți utilizatorii"
+                placeholderTextColor="rgba(220,220,230,0.45)"
+                style={[styles.loginInput, { height: 90, textAlignVertical: "top" }]}
+                multiline
+              />
+              <View style={styles.adminActionsRow}>
+                <SoftButton title="TRIMITE" onPress={handleAdminNotifyAll} disabled={!adminNoticeBody.trim()} />
+              </View>
+
+              <View style={{ height: 18 }} />
+              <Text style={styles.sectionTitle}>Set credits</Text>
+              <Text style={styles.loginLabel}>Username</Text>
+              <TextInput
+                value={adminCreditUser}
+                onChangeText={setAdminCreditUser}
+                placeholder="user"
+                placeholderTextColor="rgba(220,220,230,0.45)"
+                style={styles.loginInput}
+              />
+              <Text style={styles.loginLabel}>Credits</Text>
+              <TextInput
+                value={adminCreditAmount}
+                onChangeText={setAdminCreditAmount}
+                keyboardType="numeric"
+                placeholder="1000"
+                placeholderTextColor="rgba(220,220,230,0.45)"
+                style={styles.loginInput}
+              />
+              <View style={styles.adminActionsRow}>
+                <SoftButton
+                  title="APLICĂ"
+                  onPress={async () => {
+                    if (!adminCreditUser.trim()) return;
+                    const amount = parseInt(adminCreditAmount, 10) || 0;
+                    setAdminStatus("...");
+                    try {
+                      await apiPost("admin_set_credits", { username: adminCreditUser.trim(), credits: amount });
+                      setAdminStatus(`Setat ${amount} credite pentru ${adminCreditUser.trim()}`);
+                    } catch (e: any) {
+                      setAdminStatus(e?.message || "Eroare");
+                    }
+                  }}
+                />
+              </View>
+
+              <View style={{ height: 18 }} />
+              <Text style={styles.sectionTitle}>Home feed</Text>
+              <Text style={styles.scoreSub}>Admin edit pentru COMM_FEED (op?ional imagine din site).</Text>
+              <View style={{ height: 10 }} />
+              {(adminFeedDraft.length ? adminFeedDraft : [{ id: "feed-1", tag: "", title: "", desc: "", imageKey: "" }]).map(
+                (item: any, idx: number) => (
+                  <View key={item?.id || idx} style={styles.adminFeedCard}>
+                    <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                      <Text style={styles.loginLabel}>Item #{idx + 1}</Text>
+                      <Pressable
+                        onPress={() =>
+                          setAdminFeedDraft((arr) =>
+                            (arr.length ? arr : [{ id: `feed-${idx + 1}` }]).filter((_, i) => i !== idx)
+                          )
+                        }
+                        style={[styles.menuPill, { borderColor: "#ff6b6b", backgroundColor: "rgba(255,107,107,0.12)" }]}
+                      >
+                        <Text style={styles.menuPillText}>REMOVE</Text>
+                      </Pressable>
+                    </View>
+                    <Text style={styles.loginLabel}>Tag</Text>
+                    <TextInput
+                      value={item?.tag || ""}
+                      onChangeText={(v) =>
+                        setAdminFeedDraft((arr) =>
+                          (arr.length ? arr : [{ id: `feed-${idx + 1}` }]).map((it, i) =>
+                            i === idx ? { ...it, tag: v } : it
+                          )
+                        )
+                      }
+                      placeholder="SYSTEM UPDATE"
+                      placeholderTextColor="rgba(220,220,230,0.45)"
+                      style={styles.loginInput}
+                    />
+                    <Text style={styles.loginLabel}>Title</Text>
+                    <TextInput
+                      value={item?.title || ""}
+                      onChangeText={(v) =>
+                        setAdminFeedDraft((arr) =>
+                          (arr.length ? arr : [{ id: `feed-${idx + 1}` }]).map((it, i) =>
+                            i === idx ? { ...it, title: v } : it
+                          )
+                        )
+                      }
+                      placeholder="PATCH 2.0.4"
+                      placeholderTextColor="rgba(220,220,230,0.45)"
+                      style={styles.loginInput}
+                    />
+                    <Text style={styles.loginLabel}>Desc</Text>
+                    <TextInput
+                      value={item?.desc || ""}
+                      onChangeText={(v) =>
+                        setAdminFeedDraft((arr) =>
+                          (arr.length ? arr : [{ id: `feed-${idx + 1}` }]).map((it, i) =>
+                            i === idx ? { ...it, desc: v } : it
+                          )
+                        )
+                      }
+                      placeholder="Text scurt..."
+                      placeholderTextColor="rgba(220,220,230,0.45)"
+                      style={[styles.loginInput, { height: 70, textAlignVertical: "top" }]}
+                      multiline
+                    />
+                    <Text style={styles.loginLabel}>Image key (optional)</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                      {HOME_FEED_LIBRARY.map((opt) => (
+                        <Pressable
+                          key={opt.key}
+                          onPress={() =>
+                            setAdminFeedDraft((arr) =>
+                              (arr.length ? arr : [{ id: `feed-${idx + 1}` }]).map((it, i) =>
+                                i === idx ? { ...it, imageKey: opt.key } : it
+                              )
+                            )
+                          }
+                          style={[
+                            styles.menuPill,
+                            item?.imageKey === opt.key && { borderColor: "#58f1c2", backgroundColor: "rgba(88,241,194,0.16)" },
+                          ]}
+                        >
+                          <Text style={styles.menuPillText}>{opt.label}</Text>
+                        </Pressable>
+                      ))}
+                      <Pressable
+                        onPress={() =>
+                          setAdminFeedDraft((arr) =>
+                            (arr.length ? arr : [{ id: `feed-${idx + 1}` }]).map((it, i) =>
+                              i === idx ? { ...it, imageKey: "" } : it
+                            )
+                          )
+                        }
+                        style={[
+                          styles.menuPill,
+                          !item?.imageKey && { borderColor: "#ffc857", backgroundColor: "rgba(255,200,87,0.18)" },
+                        ]}
+                      >
+                        <Text style={styles.menuPillText}>No image</Text>
+                      </Pressable>
+                    </ScrollView>
+                  </View>
+                )
+              )}
+              <View style={styles.adminActionsRow}>
+                <SoftButton
+                  title="ADD ITEM"
+                  onPress={() =>
+                    setAdminFeedDraft((arr) => [
+                      ...(arr || []),
+                      { id: `feed-${(arr?.length || 0) + 1}`, tag: "", title: "", desc: "", imageKey: "" },
+                    ])
+                  }
+                />
+                <SoftButton title="SAVE FEED" onPress={handleAdminSaveHomeFeed} />
+              </View>
+
+              {adminStatus ? <Text style={styles.loginHint}>{adminStatus}</Text> : null}
+            </View>
+          </ScrollView>
+        </ImageBackground>
+      </SafeAreaView>
+    );
+  }
+
+  if (screen === "CHALLENGES") {
+    const diffVal = Number(challengeDiff) || 0;
+    const rewardVal = challengeRewardGadget ? 10 : 0;
+    const gearPenalty = Math.max(0, challengeGearAllowed.length - 2) * 5 + challengeGearFree.length * 2;
+    const charPenalty = Math.min(120, challengeChars.length * 8);
+    const flagPenalty =
+      (challengeFlags.camera ? 0 : 8) +
+      (challengeFlags.doorL ? 0 : 10) +
+      (challengeFlags.doorR ? 0 : 10) +
+      (challengeFlags.music ? 0 : 6) +
+      (challengeFlags.vents ? 0 : 8);
+    const autoDifficulty = Math.min(200, diffVal + gearPenalty + charPenalty + flagPenalty);
+    const tier =
+      autoDifficulty >= 170
+        ? "IMPOSSIBLE DEMON"
+        : autoDifficulty >= 150
+        ? "EXTREME"
+        : autoDifficulty >= 130
+        ? "INSANE"
+        : autoDifficulty >= 110
+        ? "DEMON"
+        : autoDifficulty >= 90
+        ? "HARD"
+        : autoDifficulty >= 60
+        ? "MEDIUM"
+        : "EASY";
+    const tierColor =
+      tier === "IMPOSSIBLE DEMON"
+        ? "#ff4d6d"
+        : tier === "EXTREME"
+        ? "#ff784f"
+        : tier === "INSANE"
+        ? "#ff9f1c"
+        : tier === "DEMON"
+        ? "#f72585"
+        : tier === "HARD"
+        ? "#ffb703"
+        : tier === "MEDIUM"
+        ? "#4cc9f0"
+        : "#8bc34a";
+    const charNameSize = SW < 600 ? 10 : SW < 900 ? 11 : 12;
+    const charMetaSize = SW < 600 ? 9 : SW < 900 ? 10 : 11;
+    return (
+      <SafeAreaView style={styles.root}>
+        <StatusBar barStyle="light-content" />
+        <ImageBackground source={IMG.rooms[bgPick]} style={styles.bg} resizeMode="cover">
+          <View style={styles.overlayStrong} />
+          <ScrollView contentContainerStyle={styles.socialWrap}>
+            <View style={[styles.statsCard, shadow as any]}>
+              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                <View>
+                  <Text style={styles.scoreTitle}>Challenges</Text>
+                  <Text style={styles.scoreSub}>Daily / weekly / custom cu leaderboard</Text>
+                </View>
+                <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+                  <SoftButton title="Listă" onPress={() => setChallengeTab("list")} disabled={challengeTab === "list"} />
+                  <SoftButton title="Create" onPress={() => setChallengeTab("create")} disabled={challengeTab === "create"} />
+                  <SoftButton title="Înapoi" onPress={() => setScreen("MENU")} />
+                </View>
+              </View>
+            </View>
+
+            {challengeTab === "create" && authToken && (
+              <View style={[styles.statsCard, shadow as any]}>
+                <Text style={styles.sectionTitle}>Creează challenge</Text>
+                <TextInput
+                  value={challengeTitle}
+                  onChangeText={setChallengeTitle}
+                  placeholder="Titlu"
+                  placeholderTextColor="rgba(220,220,230,0.45)"
+                  style={styles.loginInput}
+                />
+                <Text style={styles.loginLabel}>Font titlu</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
+                  {DISPLAY_FONTS.map((f) => (
+                    <Pressable
+                      key={f}
+                      onPress={() => setChallengeFont(f)}
+                      style={[
+                        styles.menuPill,
+                        challengeFont === f && { borderColor: "#7ee0ff", backgroundColor: "rgba(126,224,255,0.16)" },
+                      ]}
+                    >
+                      <Text style={[styles.menuPillText, { fontFamily: f }]}>{f}</Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+                <TextInput
+                  value={challengeDesc}
+                  onChangeText={setChallengeDesc}
+                  placeholder="Descriere (opțional)"
+                  placeholderTextColor="rgba(220,220,230,0.45)"
+                  style={[styles.loginInput, { height: 70, textAlignVertical: "top" }]}
+                  multiline
+                />
+                <Text style={styles.loginLabel}>Reward (alege gadget)</Text>
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                  {GADGET_SHOP.map((g) => {
+                    const active = challengeRewardGadget === g.id;
+                    return (
+                      <Pressable
+                        key={g.id}
+                        onPress={() => setChallengeRewardGadget(active ? "" : g.id)}
+                        style={[
+                          styles.menuPill,
+                          active && { borderColor: "#58f1c2", backgroundColor: "rgba(88,241,194,0.16)" },
+                        ]}
+                      >
+                        <Text style={styles.menuPillText}>{g.name}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <Text style={styles.loginLabel}>Preset name (opțional)</Text>
+                <TextInput
+                  value={challengePreset}
+                  onChangeText={setChallengePreset}
+                  placeholder="Preset de pornire"
+                  placeholderTextColor="rgba(220,220,230,0.45)"
+                  style={styles.loginInput}
+                />
+                <Text style={styles.loginLabel}>Animatronici (selectează)</Text>
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
+                  {CHARACTERS_50.map((c) => {
+                    const active = challengeChars.includes(c.id);
+                    const img = charImg(c.id);
+                    return (
+                      <Pressable
+                        key={c.id}
+                        onPress={() =>
+                          setChallengeChars((prev) => (prev.includes(c.id) ? prev.filter((x) => x !== c.id) : [...prev, c.id]))
+                        }
+                        style={[
+                          styles.statsCard,
+                          {
+                            width: "10%",
+                            padding: 0,
+                            overflow: "hidden",
+                            borderColor: active ? "#7ee0ff" : "rgba(255,255,255,0.08)",
+                          },
+                        ]}
+                      >
+                        <ImageBackground source={img} style={{ height: 120, width: "100%" }} resizeMode="cover" />
+                        <View style={{ padding: 10, gap: 4 }}>
+                          <Text style={[styles.sectionTitle, { fontSize: charNameSize }]}>{c.name}</Text>
+                          <Text style={[styles.loginHint, { fontSize: charMetaSize }]}>{ABILITY_DESC[c.ability]}</Text>
+                          <Text style={[styles.loginHint, { fontSize: charMetaSize }]}>
+                            Entry: {c.entry} • Diff {c.difficulty}
+                          </Text>
+                        </View>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <Text style={styles.loginLabel}>Allowed gear</Text>
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                  {GADGET_SHOP.map((g) => {
+                    const active = challengeGearAllowed.includes(g.id);
+                    return (
+                      <Pressable
+                        key={g.id}
+                        onPress={() =>
+                          setChallengeGearAllowed((prev) => (prev.includes(g.id) ? prev.filter((x) => x !== g.id) : [...prev, g.id]))
+                        }
+                        style={[
+                          styles.menuPill,
+                          active && { borderColor: "#58f1c2", backgroundColor: "rgba(88,241,194,0.16)" },
+                        ]}
+                      >
+                        <Text style={styles.menuPillText}>{g.name}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <Text style={styles.loginLabel}>Free gear (max 2)</Text>
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                  {GADGET_SHOP.map((g) => {
+                    const active = challengeGearFree.includes(g.id);
+                    return (
+                      <Pressable
+                        key={g.id}
+                        onPress={() =>
+                          setChallengeGearFree((prev) => {
+                            if (prev.includes(g.id)) return prev.filter((x) => x !== g.id);
+                            if (prev.length >= 2) return prev;
+                            return [...prev, g.id];
+                          })
+                        }
+                        style={[
+                          styles.menuPill,
+                          active && { borderColor: "#ffc857", backgroundColor: "rgba(255,200,87,0.18)" },
+                        ]}
+                      >
+                        <Text style={styles.menuPillText}>{g.name}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <Text style={styles.loginLabel}>Sisteme active</Text>
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                  {[
+                    { id: "camera", label: "Camera" },
+                    { id: "doorL", label: "Door L" },
+                    { id: "doorR", label: "Door R" },
+                    { id: "music", label: "Music" },
+                    { id: "vents", label: "Vents" },
+                  ].map((f) => {
+                    const active = (challengeFlags as any)[f.id];
+                    return (
+                      <Pressable
+                        key={f.id}
+                        onPress={() => setChallengeFlags((p) => ({ ...p, [f.id]: !p[f.id] }))}
+                        style={[
+                          styles.menuPill,
+                          active && { borderColor: "#7ee0ff", backgroundColor: "rgba(126,224,255,0.16)" },
+                        ]}
+                      >
+                        <Text style={styles.menuPillText}>{active ? f.label : `No ${f.label}`}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <Text style={styles.loginLabel}>Public / Privat</Text>
+                <View style={{ flexDirection: "row", gap: 8 }}>
+                  <Pressable
+                    onPress={() => setChallengePrivate(false)}
+                    style={[
+                      styles.menuPill,
+                      !challengePrivate && { borderColor: "#58f1c2", backgroundColor: "rgba(88,241,194,0.16)" },
+                    ]}
+                  >
+                    <Text style={styles.menuPillText}>Public</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => setChallengePrivate(true)}
+                    style={[
+                      styles.menuPill,
+                      challengePrivate && { borderColor: "#ffc857", backgroundColor: "rgba(255,200,87,0.18)" },
+                    ]}
+                  >
+                    <Text style={styles.menuPillText}>Privat</Text>
+                  </Pressable>
+                </View>
+                {challengePrivate && (
+                  <>
+                    <Text style={styles.loginLabel}>Cod acces</Text>
+                    <TextInput
+                      value={challengeAccessCode}
+                      onChangeText={setChallengeAccessCode}
+                      placeholder="ex: FNAP123"
+                      placeholderTextColor="rgba(220,220,230,0.45)"
+                      style={styles.loginInput}
+                    />
+                  </>
+                )}
+                <Text style={styles.loginLabel}>Thumbnail & icon</Text>
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                  {Object.keys(IMG.rooms).slice(0, 10).map((k) => (
+                    <Pressable
+                      key={k}
+                      onPress={() => setChallengeThumb(k)}
+                      style={[styles.menuPill, challengeThumb === k && { borderColor: "#58f1c2", backgroundColor: "rgba(88,241,194,0.16)" }]}
+                    >
+                      <Text style={styles.menuPillText}>{k}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 6 }}>
+                  {Object.keys(IMG.rooms).slice(10, 18).map((k) => (
+                    <Pressable
+                      key={k}
+                      onPress={() => setChallengeIcon(k)}
+                      style={[styles.menuPill, challengeIcon === k && { borderColor: "#ffc857", backgroundColor: "rgba(255,200,87,0.18)" }]}
+                    >
+                      <Text style={styles.menuPillText}>{k}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+                <Text style={styles.loginLabel}>Dificultate de bază (0-200)</Text>
+                <TextInput
+                  value={challengeDiff}
+                  onChangeText={setChallengeDiff}
+                  placeholder="50"
+                  keyboardType="numeric"
+                  placeholderTextColor="rgba(220,220,230,0.45)"
+                  style={styles.loginInput}
+                />
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginTop: 6 }}>
+                  <View
+                    style={{
+                      paddingHorizontal: 10,
+                      paddingVertical: 8,
+                      borderRadius: 10,
+                      borderWidth: 1,
+                      borderColor: `${tierColor}80`,
+                      backgroundColor: `${tierColor}20`,
+                    }}
+                  >
+                    <Text style={{ color: tierColor, fontWeight: "900" }}>
+                      {tier} • scor {autoDifficulty}
+                    </Text>
+                    <Text style={styles.loginHint}>+{Math.floor(rewardVal / 50)} (reward) +{gearPenalty} (gear lock)</Text>
+                  </View>
+                </View>
+                <View style={{ height: 12 }} />
+                <Text style={styles.loginLabel}>Preview competiție</Text>
+                <View style={[styles.statsCard, shadow as any, { padding: 10 }]}>
+                  <ImageBackground
+                    source={IMG.rooms[challengeThumb] ?? IMG.rooms.back1}
+                    style={{ height: 110, borderRadius: 12, overflow: "hidden", justifyContent: "flex-end" }}
+                    resizeMode="cover"
+                  >
+                    <View style={{ padding: 8, backgroundColor: "rgba(5,10,18,0.55)" }}>
+                      <Text style={[styles.sectionTitle, { fontFamily: challengeFont, fontSize: 14 }]}>{challengeTitle || "Titlu challenge"}</Text>
+                      <Text style={styles.loginHint}>
+                        {challengeType.toUpperCase()} • {tier} • Reward: {challengeRewardGadget || "—"}
+                      </Text>
+                    </View>
+                  </ImageBackground>
+                  <Text style={[styles.loginHint, { marginTop: 6 }]}>
+                    {challengeDesc || "Descriere…"} • Animatronici: {challengeChars.length} • Gear: {challengeGearAllowed.length} (+{challengeGearFree.length} free)
+                  </Text>
+                </View>
+                <View style={{ flexDirection: "row", gap: 8 }}>
+                  {(["daily", "weekly", "custom"] as const).map((t) => (
+                    <Pressable
+                      key={t}
+                      onPress={() => setChallengeType(t)}
+                      style={[
+                        styles.menuPill,
+                        challengeType === t && { borderColor: "#58f1c2", backgroundColor: "rgba(88,241,194,0.12)" },
+                      ]}
+                    >
+                      <Text style={styles.menuPillText}>{t.toUpperCase()}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+                <View style={{ height: 10 }} />
+                <View style={styles.adminActionsRow}>
+                  <SoftButton title="CREEAZĂ" onPress={createChallenge} />
+                  <SoftButton title="REFRESH" onPress={fetchChallenges} />
+                </View>
+                {challengeStatus ? <Text style={styles.loginHint}>{challengeStatus}</Text> : null}
+              </View>
+            )}
+
+            {challengeTab === "list" &&
+              challenges.map((c) => {
+                const diff = Number(c.difficulty_score) || 0;
+                const tier =
+                  diff >= 170
+                  ? "IMPOSSIBLE DEMON"
+                  : diff >= 150
+                  ? "EXTREME"
+                  : diff >= 130
+                  ? "INSANE"
+                  : diff >= 110
+                  ? "DEMON"
+                  : diff >= 90
+                  ? "HARD"
+                  : diff >= 60
+                  ? "MEDIUM"
+                  : "EASY";
+              const tierColor =
+                tier === "IMPOSSIBLE DEMON"
+                  ? "#ff4d6d"
+                  : tier === "EXTREME"
+                  ? "#ff784f"
+                  : tier === "INSANE"
+                  ? "#ff9f1c"
+                  : tier === "DEMON"
+                  ? "#f72585"
+                  : tier === "HARD"
+                  ? "#ffb703"
+                  : tier === "MEDIUM"
+                  ? "#4cc9f0"
+                  : "#8bc34a";
+                return (
+                  <Pressable
+                    key={c.id}
+                    style={[styles.statsCard, shadow as any]}
+                    onPress={() => {
+                      setChallengeSelected(c);
+                      setChallengeTab("detail");
+                    }}
+                  >
+                  <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                    <View>
+                      <Text style={styles.sectionTitle}>{c.title}</Text>
+                      <Text style={styles.loginHint}>
+                        {c.type?.toUpperCase()} • de {c.creator || "anon"} • expira {c.expires_at?.slice(0, 10)}
+                      </Text>
+                    </View>
+                    <View
+                      style={{
+                        paddingHorizontal: 10,
+                        paddingVertical: 6,
+                        borderRadius: 999,
+                        borderWidth: 1,
+                        borderColor: `${tierColor}80`,
+                        backgroundColor: `${tierColor}22`,
+                      }}
+                    >
+                      <Text style={{ color: tierColor, fontWeight: "900", fontSize: 12 }}>{tier}</Text>
+                    </View>
+                  </View>
+                  {c.pinned ? <Text style={[styles.loginHint, { color: "#ffc857" }]}>PINNED</Text> : null}
+                  {c.description ? <Text style={styles.loginLabel}>{c.description}</Text> : null}
+                  <View style={{ height: 6 }} />
+                  <Text style={styles.loginHint}>
+                    Reward: {c.reward_credits || 0} credits{c.reward_gadget ? ` + ${c.reward_gadget}` : ""} • Preset:{" "}
+                    {c.preset_name || "liber"} {c.gear_lock ? "• Gear restricționat" : ""}
+                  </Text>
+                  <View style={{ height: 8 }} />
+                  <Text style={styles.scoreSub}>Top</Text>
+                  {Array.isArray(c.leaderboard) && c.leaderboard.length ? (
+                    c.leaderboard.slice(0, 5).map((row, idx) => (
+                      <View key={row.user_id + idx} style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                        <Text style={styles.loginLabel}>
+                          #{idx + 1} {row.username}
+                        </Text>
+                        <Text style={styles.loginHint}>{row.score}</Text>
+                      </View>
+                    ))
+                  ) : (
+                    <Text style={styles.loginHint}>Nimic încă</Text>
+                  )}
+                  {isAdminUser && (
+                    <View style={styles.adminActionsRow}>
+                      <Pressable
+                        onPress={async () => {
+                          try {
+                            await apiPost("challenge_pin", { challengeId: c.id, pinned: !c.pinned });
+                            fetchChallenges();
+                          } catch {}
+                        }}
+                        style={[styles.iconPill, { backgroundColor: "rgba(255,255,255,0.06)" }]}
+                      >
+                        <Text style={styles.menuPillText}>{c.pinned ? "UNPIN" : "PIN"}</Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => handleAdminDeleteChallenge(c.id)}
+                        style={[styles.iconPill, { backgroundColor: "rgba(255,80,80,0.15)" }]}
+                      >
+                        <Text style={[styles.menuPillText, { color: "#ff8a8a" }]}>DELETE</Text>
+                      </Pressable>
+                    </View>
+                  )}
+                </Pressable>
+              );
+            })}
+            {challengeTab === "detail" && challengeSelected && (
+              <View style={[styles.statsCard, shadow as any]}>
+                <Text style={styles.sectionTitle}>Detalii challenge</Text>
+                <Text style={styles.loginLabel}>{challengeSelected.title}</Text>
+                <Text style={styles.loginHint}>{challengeSelected.description || "Fără descriere"}</Text>
+                <Text style={styles.loginHint}>
+                  Reward: {challengeSelected.reward_credits || 0} credite{" "}
+                  {challengeSelected.reward_gadget ? `+ ${challengeSelected.reward_gadget}` : ""}
+                </Text>
+                <Text style={styles.loginHint}>Preset: {challengeSelected.preset_name || "liber"}</Text>
+                <Text style={styles.loginHint}>
+                  Gear:{" "}
+                  {challengeSelected.gear_lock?.allowed?.length
+                    ? challengeSelected.gear_lock.allowed.join(", ")
+                    : challengeSelected.settings?.allowedGear?.length
+                    ? challengeSelected.settings.allowedGear.join(", ")
+                    : "liber"}
+                </Text>
+                <Text style={styles.loginHint}>
+                  Free gear:{" "}
+                  {challengeSelected.gear_lock?.free?.length
+                    ? challengeSelected.gear_lock.free.join(", ")
+                    : challengeSelected.settings?.freeGear?.length
+                    ? challengeSelected.settings.freeGear.join(", ")
+                    : "none"}
+                </Text>
+                <Text style={styles.loginHint}>
+                  Animatronici: {challengeSelected.settings?.animatronics ? challengeSelected.settings.animatronics.join(", ") : "liber"}
+                </Text>
+                {challengeSelected.is_private && (
+                  <>
+                    <Text style={styles.loginLabel}>Cod acces</Text>
+                    <TextInput
+                      value={challengeJoinCode}
+                      onChangeText={setChallengeJoinCode}
+                      placeholder="cod"
+                      placeholderTextColor="rgba(220,220,230,0.45)"
+                      style={styles.loginInput}
+                    />
+                  </>
+                )}
+                <View style={styles.adminActionsRow}>
+                  {!challengeJoinedIds.includes(challengeSelected.id) ? (
+                    <SoftButton
+                      title={challengeSelected.is_private ? "JOIN (CODE)" : "JOIN CHALLENGE"}
+                      onPress={async () => {
+                        if (challengeSelected.is_private && !challengeJoinCode) {
+                          setChallengeStatus("Cod necesar pentru private.");
+                          return;
+                        }
+                        try {
+                          await apiPost("challenge_join", {
+                            challengeId: challengeSelected.id,
+                            code: challengeSelected.is_private ? challengeJoinCode : null,
+                          });
+                          setChallengeJoinedIds((prev) => [...prev, challengeSelected.id]);
+                          setChallengeStatus("Înscris!");
+                        } catch (e: any) {
+                          setChallengeStatus(e?.message || "Cod invalid.");
+                        }
+                      }}
+                    />
+                  ) : (
+                    <SoftButton
+                      title="PLAY"
+                      onPress={() => {
+                        challengeRunRef.current = challengeSelected.id;
+                        if (challengeSelected?.settings) applySettings(challengeSelected.settings);
+                        setScreen("GAME");
+                        startGame();
+                      }}
+                    />
+                  )}
+                  <SoftButton title="LEADERBOARD" onPress={() => {}} />
+                  <SoftButton
+                    title="Înapoi"
+                    onPress={() => {
+                      setChallengeSelected(null);
+                      setChallengeTab("list");
+                    }}
+                  />
+                </View>
+              </View>
+            )}
+          </ScrollView>
+        </ImageBackground>
+      </SafeAreaView>
+    );
+  }
+
   if (screen === "PROFILE") {
+    const bannerSource = profileView?.banner_url ? IMG.rooms[profileView.banner_url] ?? IMG.rooms.back1 : IMG.rooms.back1;
+    const bgSource = profileView?.background_url ? IMG.rooms[profileView.background_url] ?? IMG.rooms.back1 : IMG.rooms.back1;
+    const isMeProfile = authUser?.username && profileView?.username === authUser.username;
+    const profileBadges = isMeProfile ? badgesSelected : profileView?.badges ?? [];
     return (
       <>
         <ProfileScreen
@@ -4488,11 +6381,16 @@ export default function App() {
           profileFollowing={profileFollowing}
           profileStats={profileStats}
           profileFeatured={profileFeatured}
+          profileBadges={profileBadges}
+          badgeMeta={badgeMeta}
           profileIsFollowing={profileIsFollowing}
           profileIsFriend={profileIsFriend}
           profileLikedPosts={profileLikedPosts}
           profileFavoritePosts={profileFavoritePosts}
           profilePosts={profilePosts}
+          profilePolls={profilePolls}
+          bannerSource={bannerSource}
+          backgroundSource={bgSource}
           authUser={authUser}
           authToken={authToken}
           dmDraft={dmDraft}
@@ -4547,7 +6445,30 @@ export default function App() {
               return [...arr, id];
             })
           }
+          badges={BADGES}
+          badgesSelected={badgesSelected}
+          badgeUnlocked={badgeUnlocked}
+          onToggleBadge={(id) =>
+            setBadgesSelected((arr) => (arr.includes(id) ? arr.filter((x) => x !== id) : [...arr, id]))
+          }
           onBack={() => setScreen("MENU")}
+        />
+        <HelpModal />
+      </>
+    );
+  }
+
+  if (screen === "BADGES") {
+    return (
+      <>
+        <BadgesScreen
+          items={BADGES}
+          selected={badgesSelected}
+          unlocked={badgeUnlocked}
+          onToggle={(id) =>
+            setBadgesSelected((arr) => (arr.includes(id) ? arr.filter((x) => x !== id) : [...arr, id]))
+          }
+          onBack={() => setScreen("ACHIEVEMENTS")}
         />
         <HelpModal />
       </>
@@ -4566,6 +6487,7 @@ export default function App() {
           messageSearch={messageSearch}
           authUsername={authUser?.username}
           isAdmin={isAdminUser}
+          badgeMeta={badgeMeta}
           onAdminDeleteMessage={handleAdminDeleteMessage}
           onAdminEditMessage={handleAdminEditMessage}
           onMessageSearchChange={setMessageSearch}
@@ -4584,60 +6506,154 @@ export default function App() {
       <>
         <HomeScreen
           profileName={profileName || "Guest"}
-          profileEmail={authUser?.email || "guest"}
           profileAvatar={profileAvatar}
-          profileSearch={profileSearch}
-          profileResults={profileResults}
-          onProfileSearchChange={setProfileSearch}
-          onSearchUsers={async () => {
-            try {
-              const d = await apiGet(`profiles_search?q=${encodeURIComponent(profileSearch.trim())}`);
-              setProfileResults(d?.results ?? []);
-            } catch {}
-          }}
-          onOpenProfile={openProfile}
-          onGoAccount={() => (authToken ? setScreen("ACCOUNT") : setScreen("LOGIN"))}
+          credits={credits}
+          highestScore={userStats?.best ?? best}
+          isAdmin={isAdminUser}
+          backgroundSource={IMG.rooms.holprincipal}
+          feedItems={(homeFeedItems || []).map((it: any, idx: number) => ({
+            id: it?.id || `feed-${idx + 1}`,
+            tag: String(it?.tag || "UPDATE"),
+            title: String(it?.title || "Update"),
+            desc: String(it?.desc || ""),
+            imageSource: resolveHomeFeedImage(it?.imageKey || null),
+          }))}
           onStart={startGame}
           onSelect={() => setScreen("SELECT")}
           onWorkshop={() => setScreen("WORKSHOP")}
-          onIntel={() => setScreen("INTEL")}
-          onScores={() => setScreen("SCORES")}
-          onStats={() => setScreen("STATS")}
-          onSeeds={() => setScreen("SEEDS")}
           onSocial={() => setScreen("SOCIAL")}
-          onNotifs={() => (authToken ? setScreen("NOTIFS") : setScreen("LOGIN"))}
           onAchievements={() => setScreen("ACHIEVEMENTS")}
+          onChallenges={() => setScreen("CHALLENGES")}
+          onSpin={() => setScreen("SPIN")}
+          onScores={() => setScreen("SCORES")}
           onMessages={() => setScreen("MESSAGES")}
+          onNotifs={() => (authToken ? setScreen("NOTIFS") : setScreen("LOGIN"))}
+          onGoAccount={() => (authToken ? setScreen("ACCOUNT") : setScreen("LOGIN"))}
+          onTrade={() => setScreen("TRADE_MARKET")}
+          onCollectibles={() => setScreen("COLLECTIBLES")}
+          onAdmin={() => setScreen("ADMIN")}
         />
         <HelpModal />
       </>
     );
   }
 
-if (screen === "SELECT") {
+  if (screen === "TRADE_MARKET") {
+    return (
+      <>
+        <TradeMarketScreen
+          trades={Array.isArray(trades) ? trades.map((t: any) => ({
+            id: String(t.id || ""),
+            creator: t.creator_username || t.creator || "User",
+            items: t.items_creator || [],
+            wants: t.items_partner || [],
+            fee: Number(t.fee_credits || 0),
+            status: t.status || "open",
+          })) : []}
+          onOpenTrade={() => setScreen("TRADE")}
+          onCreateTrade={() => setScreen("TRADE")}
+          onBack={() => setScreen("MENU")}
+        />
+        <HelpModal />
+      </>
+    );
+  }
+
+  if (screen === "TRADE") {
+    return (
+      <>
+        <TradeScreen onBack={() => setScreen("TRADE_MARKET")} />
+        <HelpModal />
+      </>
+    );
+  }
+
+  if (screen === "COLLECTIBLES") {
+    return (
+      <>
+        <CollectiblesScreen
+          items={collectibles || []}
+          allCharacters={CHARACTERS_50.map((c) => ({ id: c.id, name: c.name, image: charImg(c.id) }))}
+          isAdmin={!!isAdminUser}
+          onAdminAdd={async ({ username, character_id, rarity, amount }) => {
+            await apiPost("admin_collectible_add", {
+              username,
+              character_id,
+              rarity,
+              amount,
+            });
+            const cl = await apiGet("collectible_list");
+            setCollectibles(Array.isArray(cl?.collectibles) ? cl.collectibles : []);
+          }}
+          onSell={async (id, price) => {
+            const res = await apiPost("collectible_sell", { id });
+            if (typeof res?.credits === "number") {
+              setCredits(res.credits);
+              saveSettingsImmediate({ credits: res.credits });
+            }
+            setCollectibles((prev) => (prev || []).filter((c: any) => c.id !== id));
+            return res;
+          }}
+          onBack={() => setScreen("MENU")}
+        />
+        <HelpModal />
+      </>
+    );
+  }
+
+  if (screen === "SELECT") {
     const selectedCount = selectedList.length;
     const info = CHARACTERS_50.find((c) => c.id === selectedInfoId) ?? CHARACTERS_50[0];
+    const selectCompact = SW < 1400 || SH < 820;
+    const selectTopStack = SW < 900 || SH < 720;
+    const selectCols = SW < 420 ? 2 : SW < 620 ? 3 : SW < 900 ? 4 : SW < 1300 ? 6 : 10;
+    const showTileMeta = SW >= 1400;
+    const bonusPct = Math.max(0, Math.round((challengeMultiplier(challenge) - 1) * 100));
+    const selectTitleSize = SW < 520 || SH < 700 ? 24 : SW < 900 ? 32 : 44;
+    const selectSubSize = SW < 520 || SH < 700 ? 12 : SW < 900 ? 15 : 18;
     return (
       <SafeAreaView style={styles.root}>
         <StatusBar barStyle="light-content" />
         <ImageBackground source={IMG.rooms.holprincipal} style={styles.bg} resizeMode="cover">
           <View style={styles.overlayStrong} />
-          <View style={styles.selectHeaderAlt}>
-            <Text style={styles.selectTitleAlt}>CUSTOM NIGHT</Text>
-            <Text style={styles.selectSubAlt}>Selecteaz? animatronici (minim 4)</Text>
-          </View>
+          <View style={styles.selectShell}>
+            <View style={[styles.selectTopbar, selectTopStack && styles.selectTopbarStack]}>
+              <View>
+                <Text style={[styles.selectTitleAlt, { fontSize: selectTitleSize }]}>CUSTOM NIGHT</Text>
+                <Text style={[styles.selectSubAlt, { fontSize: selectSubSize }]}>Selecteaz? animatronici (minim 4)</Text>
+              </View>
+              <View style={[styles.selectTopActions, selectTopStack && styles.selectTopActionsStack]}>
+                <View style={styles.selectStatPill}>
+                  <Text style={styles.selectStatLabel}>Selectate</Text>
+                  <Text style={styles.selectStatValue}>
+                    {selectedCount}/{CHARACTERS_50.length}
+                  </Text>
+                </View>
+                <View style={styles.selectStatPill}>
+                  <Text style={styles.selectStatLabel}>Bonus score</Text>
+                  <Text style={styles.selectStatValue}>+{bonusPct}%</Text>
+                </View>
+                <SoftButton title={selectedCount >= 4 ? "GO!" : "MIN 4"} tone="good" disabled={selectedCount < 4} onPress={startGame} />
+                <SoftButton title="?NAPOI" onPress={() => setScreen("MENU")} />
+              </View>
+            </View>
 
-          <View style={styles.selectLayout}>
-            <View style={[styles.selectGridCard, shadow as any]}>
-              <FlatList
-                data={CHARACTERS_50}
-                numColumns={6}
-                keyExtractor={(it) => it.id}
-                contentContainerStyle={{ padding: 10 }}
-                scrollEnabled
-                renderItem={({ item }) => {
-                  const on = !!selected[item.id];
-                  const glowOpacity = selectPulse.interpolate({ inputRange: [0, 1], outputRange: [0.25, 0.7] });
+            <View style={[styles.selectLayoutNew, selectCompact && styles.selectLayoutStack]}>
+              <View style={[styles.selectPanel, styles.selectGridPanel, shadow as any, selectCompact && { maxHeight: Math.max(240, Math.floor(SH * 0.48)) }]}>
+                <View style={styles.panelHeader}>
+                  <Text style={styles.panelTitle}>Animatronics</Text>
+                  <Text style={styles.panelMeta}>Tap pentru ON/OFF ? L1?L20</Text>
+                </View>
+                <FlatList
+                  key={selectCols}
+                  data={CHARACTERS_50}
+                  numColumns={selectCols}
+                  keyExtractor={(it) => it.id}
+                  contentContainerStyle={{ padding: selectCols <= 4 ? 6 : 10 }}
+                  scrollEnabled
+                  renderItem={({ item }) => {
+                    const on = !!selected[item.id];
+                    const glowOpacity = selectPulse.interpolate({ inputRange: [0, 1], outputRange: [0.25, 0.7] });
                     const lvl = clamp(customLevels[item.id] ?? item.difficulty, 0, 20);
                     const threatPct = Math.round((lvl / 20) * 100);
                     const cooldownBase = clamp(2.4 - lvl * 0.06, 0.4, 3.2);
@@ -4648,121 +6664,151 @@ if (screen === "SELECT") {
                           setSelected((p) => ({ ...p, [item.id]: !p[item.id] }));
                         }}
                         activeOpacity={0.86}
-                        style={[styles.charTile, on && styles.charTileOn]}
+                        style={[styles.charTile, { width: `${100 / selectCols}%` }, on && styles.charTileOn]}
                       >
                         <Image source={charImg(item.id)} style={styles.charTileImg} resizeMode="cover" />
                         {on && <Animated.View pointerEvents="none" style={[styles.charTileGlow, { opacity: glowOpacity }]} />}
-                        <View style={styles.cooldownBadge}>
-                          <Text style={styles.cooldownText}>CD {cooldownBase.toFixed(1)}s</Text>
-                        </View>
-                        <View style={styles.threatBar}>
-                          <View style={[styles.threatFill, { width: `${threatPct}%` }]} />
-                        </View>
-                        <View style={styles.charTileFooter}>
-                          <Text style={styles.charTileTxt}>{on ? `ON • L${lvl}` : `OFF • L${lvl}`}</Text>
-                        </View>
-                    </TouchableOpacity>
-                  );
-                }}
-              />
-            </View>
+                        {showTileMeta ? (
+                          <>
+                            <View style={styles.cooldownBadge}>
+                              <Text style={styles.cooldownText}>CD {cooldownBase.toFixed(1)}s</Text>
+                            </View>
+                            <View style={styles.threatBar}>
+                              <View style={[styles.threatFill, { width: `${threatPct}%` }]} />
+                            </View>
+                            <View style={styles.charTileFooter}>
+                              <Text style={styles.charTileTxt}>{on ? `ON ? L${lvl}` : `OFF ? L${lvl}`}</Text>
+                            </View>
+                          </>
+                        ) : (
+                          <View style={styles.charTileFooterCompact}>
+                            <Text style={styles.charTileTxtCompact}>{on ? `L${lvl}` : "OFF"}</Text>
+                          </View>
+                        )}
+                      </TouchableOpacity>
+                    );
+                  }}
+                />
+              </View>
 
-            <ScrollView style={[styles.selectSide, shadow as any]} contentContainerStyle={{ paddingBottom: 20 }}>
-              <Text style={styles.sideTitle}>SETTINGS</Text>
-              <SoftButton
-                title={`MODE: ${mode}`}
-                onPress={() => {
-                  const order = ["STORY", "CUSTOM", "ENDLESS", "CHALLENGE", "STEALTH", "RUSH"];
-                  const idx = order.indexOf(mode);
-                  setMode(order[(idx + 1) % order.length]);
-                }}
-              />
-              <SoftButton
-                title={`DIFFICULTY: ${DIFFICULTY_LABEL[difficultyPreset].toUpperCase()}`}
-                onPress={() => {
-                  const idx = DIFFICULTY_ORDER.indexOf(difficultyPreset);
-                  setDifficultyPreset(DIFFICULTY_ORDER[(idx + 1) % DIFFICULTY_ORDER.length]);
-                }}
-              />
-              <SoftButton
-                title={`PRESET: ${modePreset}`}
-                onPress={() => {
-                  const order = ["NORMAL", "OLD_TIMES", "BEST_LEADERS", "ARTISTS", "WRITERS", "MODERN", "SHADOWS"];
-                  const idx = order.indexOf(modePreset);
-                  setModePreset(order[(idx + 1) % order.length]);
-                }}
-              />
-              <SoftButton title={`TIER: ${modeTier}`} onPress={() => setModeTier((t) => (t % 3) + 1)} />
-              <SoftButton title={`DAILY: ${dailyRun ? "ON" : "OFF"}`} onPress={() => setDailyRun((v) => !v)} />
-              <SoftButton title={`NIGHT 6: ${night6 ? "ON" : "OFF"}`} onPress={() => setNight6((v) => !v)} />
-              <SoftButton title={`HARDCORE: ${hardcore ? "ON" : "OFF"}`} onPress={() => setHardcore((v) => !v)} />
-              <View style={{ height: 12 }} />
-              <Text style={styles.sideTitle}>SET ALL</Text>
-              <SoftButton
-                title="ALL ON"
-                onPress={() => {
-                  const s: Record<string, boolean> = {};
-                  CHARACTERS_50.forEach((c) => (s[c.id] = true));
-                  setSelected(s);
-                }}
-              />
-              <SoftButton title="CLEAR" tone="danger" onPress={() => setSelected({})} />
-              <View style={{ height: 12 }} />
-              <Text style={styles.sideTitle}>STATUS</Text>
-              <Text style={styles.sideMeta}>Selectate: {selectedCount}/{CHARACTERS_50.length}</Text>
-              <Text style={styles.sideMeta}>Profil: {profileName || "Anonim"}</Text>
-              <Text style={styles.sideMeta}>Global difficulty: {DIFFICULTY_LABEL[difficultyPreset]}</Text>
-              <Text style={styles.sideMeta}>Preset: {modePreset} (Tier {modeTier})</Text>
-              <View style={{ height: 12 }} />
-              <Text style={styles.sideTitle}>INFO</Text>
-              {!!info && (
-                <View style={styles.infoCard}>
-                  <Text style={styles.infoName}>{info.name}</Text>
-                  <Text style={styles.infoMeta}>Dificultate: {info.difficulty}</Text>
-                  <Text style={styles.infoMeta}>Intrare: {info.entry}</Text>
-                  <Text style={styles.infoMeta}>Ability: {info.ability}</Text>
-                  <View style={styles.customRow}>
-                    <Text style={styles.infoMeta}>Level: {customLevels[info.id] ?? info.difficulty}</Text>
-                    <View style={styles.customBtns}>
-                      <Pressable
-                        style={styles.customBtn}
-                        onPress={() =>
-                          setCustomLevels((p) => ({ ...p, [info.id]: clamp((p[info.id] ?? info.difficulty) - 1, 0, 20) }))
-                        }
-                      >
-                        <Text style={styles.customBtnTxt}>-</Text>
-                      </Pressable>
-                      <Pressable
-                        style={styles.customBtn}
-                        onPress={() =>
-                          setCustomLevels((p) => ({ ...p, [info.id]: clamp((p[info.id] ?? info.difficulty) + 1, 0, 20) }))
-                        }
-                      >
-                        <Text style={styles.customBtnTxt}>+</Text>
-                      </Pressable>
+              <ScrollView
+                style={[styles.selectPanel, styles.selectSidePanel, shadow as any, selectCompact && styles.selectSideStack]}
+                contentContainerStyle={{ paddingBottom: 20 }}
+                showsVerticalScrollIndicator={false}
+              >
+                <Text style={styles.sideTitle}>SETTINGS</Text>
+                <SoftButton
+                  title={`MODE: ${mode}`}
+                  onPress={() => {
+                    const order = ["STORY", "CUSTOM", "ENDLESS", "CHALLENGE", "STEALTH", "RUSH"];
+                    const idx = order.indexOf(mode);
+                    setMode(order[(idx + 1) % order.length]);
+                  }}
+                />
+                <SoftButton
+                  title={`DIFFICULTY: ${DIFFICULTY_LABEL[difficultyPreset].toUpperCase()}`}
+                  onPress={() => {
+                    const idx = DIFFICULTY_ORDER.indexOf(difficultyPreset);
+                    setDifficultyPreset(DIFFICULTY_ORDER[(idx + 1) % DIFFICULTY_ORDER.length]);
+                  }}
+                />
+                <SoftButton
+                  title={`PRESET: ${modePreset}`}
+                  onPress={() => {
+                    const order = ["NORMAL", "OLD_TIMES", "BEST_LEADERS", "ARTISTS", "WRITERS", "MODERN", "SHADOWS"];
+                    const idx = order.indexOf(modePreset);
+                    const next = order[(idx + 1) % order.length] as ModePreset;
+                    setModePreset(next);
+                    if (next !== "NORMAL") {
+                      const presetList = MODE_PRESETS[next] ?? [];
+                      const s: Record<string, boolean> = {};
+                      CHARACTERS_50.forEach((c) => (s[c.id] = presetList.includes(c.id)));
+                      setSelected(s);
+                    }
+                  }}
+                />
+                <SoftButton title={`TIER: ${modeTier}`} onPress={() => setModeTier((t) => (t % 3) + 1)} />
+                <SoftButton title={`DAILY: ${dailyRun ? "ON" : "OFF"}`} onPress={() => setDailyRun((v) => !v)} />
+                <SoftButton title={`NIGHT 6: ${night6 ? "ON" : "OFF"}`} onPress={() => setNight6((v) => !v)} />
+                <SoftButton title={`HARDCORE: ${hardcore ? "ON" : "OFF"}`} onPress={() => setHardcore((v) => !v)} />
+                <View style={{ height: 10 }} />
+                <Text style={styles.sideTitle}>CUSTOM RULES</Text>
+                <SoftButton
+                  title={`CAMERAS: ${challenge.noCams ? "OFF" : "ON"}`}
+                  onPress={() => setChallenge((c) => ({ ...c, noCams: !c.noCams }))}
+                />
+                <SoftButton
+                  title={`FLASHLIGHT: ${challenge.noFlash ? "OFF" : "ON"}`}
+                  onPress={() => setChallenge((c) => ({ ...c, noFlash: !c.noFlash }))}
+                />
+                <SoftButton
+                  title={`OVERCLOCK: ${challenge.noOverclock ? "OFF" : "ON"}`}
+                  onPress={() => setChallenge((c) => ({ ...c, noOverclock: !c.noOverclock }))}
+                />
+                <View style={{ height: 12 }} />
+                <Text style={styles.sideTitle}>SET ALL</Text>
+                <SoftButton
+                  title="ALL ON"
+                  onPress={() => {
+                    const s: Record<string, boolean> = {};
+                    CHARACTERS_50.forEach((c) => (s[c.id] = true));
+                    setSelected(s);
+                  }}
+                />
+                <SoftButton title="CLEAR" tone="danger" onPress={() => setSelected({})} />
+                <View style={{ height: 12 }} />
+                <Text style={styles.sideTitle}>STATUS</Text>
+                <Text style={styles.sideMeta}>Selectate: {selectedCount}/{CHARACTERS_50.length}</Text>
+                <Text style={styles.sideMeta}>Profil: {profileName || "Anonim"}</Text>
+                <Text style={styles.sideMeta}>Global difficulty: {DIFFICULTY_LABEL[difficultyPreset]}</Text>
+                <Text style={styles.sideMeta}>Preset: {modePreset} (Tier {modeTier})</Text>
+                <Text style={styles.sideMeta}>Bonus Score: +{bonusPct}%</Text>
+                <View style={{ height: 12 }} />
+                <Text style={styles.sideTitle}>INFO</Text>
+                {!!info && (
+                  <View style={styles.infoCard}>
+                    <Text style={styles.infoName}>{info.name}</Text>
+                    <Text style={styles.infoMeta}>Dificultate: {info.difficulty}</Text>
+                    <Text style={styles.infoMeta}>Intrare: {info.entry}</Text>
+                    <Text style={styles.infoMeta}>Ability: {info.ability}</Text>
+                    <View style={styles.customRow}>
+                      <Text style={styles.infoMeta}>Level: {customLevels[info.id] ?? info.difficulty}</Text>
+                      <View style={styles.customBtns}>
+                        <Pressable
+                          style={styles.customBtn}
+                          onPress={() =>
+                            setCustomLevels((p) => ({ ...p, [info.id]: clamp((p[info.id] ?? info.difficulty) - 1, 0, 20) }))
+                          }
+                        >
+                          <Text style={styles.customBtnTxt}>-</Text>
+                        </Pressable>
+                        <Pressable
+                          style={styles.customBtn}
+                          onPress={() =>
+                            setCustomLevels((p) => ({ ...p, [info.id]: clamp((p[info.id] ?? info.difficulty) + 1, 0, 20) }))
+                          }
+                        >
+                          <Text style={styles.customBtnTxt}>+</Text>
+                        </Pressable>
+                      </View>
                     </View>
+                    <Text style={styles.infoDesc}>{ABILITY_DESC[info.ability]}</Text>
                   </View>
-                  <Text style={styles.infoDesc}>{ABILITY_DESC[info.ability]}</Text>
-                </View>
-              )}
-              <View style={{ height: 12 }} />
-              <SoftButton
-                title={selectedCount >= 4 ? "GO!" : "MIN 4"}
-                tone={selectedCount >= 4 ? "good" : "neutral"}
-                disabled={selectedCount < 4}
-                onPress={startGame}
-              />
-              <SoftButton title="?NAPOI" onPress={() => setScreen("MENU")} />
-            </ScrollView>
+                )}
+              </ScrollView>
+            </View>
           </View>
         </ImageBackground>
       </SafeAreaView>
     );
   }
-
-  // PLAY screen
+// PLAY screen
 // PLAY screen
   const view = cameraOpen ? camView : VIEWS[0];
+  const dockCompact = SW < 1100 || SH < 900;
+  const dockMax = Math.max(110, Math.min(260, Math.floor(SH * (ultraCompact ? 0.22 : dockCompact ? 0.3 : 0.28))));
+  const compactHud = uiCompact || SH < 900;
+  const tightHud = ultraCompact || SH < 760;
   const officeBg = IMG.rooms[bgPick];
   const bg = cameraOpen ? (view.id === "OFFICE" ? officeBg : view.bg ?? officeBg) : officeBg;
   const lookShift = lookX.interpolate({ inputRange: [-1, 0, 1], outputRange: [-70, 0, 70] });
@@ -4862,68 +6908,81 @@ if (screen === "SELECT") {
         )}
 
         {/* HUD */}
-        <View style={styles.hud}>
-          <View style={styles.hudTop}>
-            <View style={styles.hudPill}>
-              <Text style={styles.hudKey}>Night</Text>
-              <Text style={styles.hudVal}>{night}/{nightMax}</Text>
+        <View style={[styles.hud, compactHud && styles.hudCompact, ultraCompact && styles.hudUltra, { marginBottom: dockMax + 16 }]}>
+          <View style={[styles.hudTop, compactHud && styles.hudTopWrap]}>
+            <View style={[styles.hudPill, compactHud && styles.hudPillCompact, ultraCompact && styles.hudPillUltra]}>
+              <Text style={[styles.hudKey, compactHud && styles.hudKeyCompact, ultraCompact && styles.hudKeyUltra]}>Night</Text>
+              <Text style={[styles.hudVal, compactHud && styles.hudValCompact, ultraCompact && styles.hudValUltra]}>{night}/{nightMax}</Text>
             </View>
-            <View style={styles.hudPill}>
-              <Text style={styles.hudKey}>Time</Text>
-              <Text style={styles.hudVal}>{hourLabel}</Text>
+            <View style={[styles.hudPill, compactHud && styles.hudPillCompact, ultraCompact && styles.hudPillUltra]}>
+              <Text style={[styles.hudKey, compactHud && styles.hudKeyCompact, ultraCompact && styles.hudKeyUltra]}>Time</Text>
+              <Text style={[styles.hudVal, compactHud && styles.hudValCompact, ultraCompact && styles.hudValUltra]}>{hourLabel}</Text>
             </View>
-            <View style={styles.hudPill}>
-              <Text style={styles.hudKey}>Score</Text>
-              <Text style={styles.hudVal}>{score}</Text>
+            <View style={[styles.hudPill, compactHud && styles.hudPillCompact, ultraCompact && styles.hudPillUltra]}>
+              <Text style={[styles.hudKey, compactHud && styles.hudKeyCompact, ultraCompact && styles.hudKeyUltra]}>Score</Text>
+              <Text style={[styles.hudVal, compactHud && styles.hudValCompact, ultraCompact && styles.hudValUltra]}>{score}</Text>
             </View>
-            <View style={styles.hudPill}>
-              <Text style={styles.hudKey}>Best</Text>
-              <Text style={styles.hudVal}>{best}</Text>
+            <View style={[styles.hudPill, compactHud && styles.hudPillCompact, ultraCompact && styles.hudPillUltra]}>
+              <Text style={[styles.hudKey, compactHud && styles.hudKeyCompact, ultraCompact && styles.hudKeyUltra]}>Best</Text>
+              <Text style={[styles.hudVal, compactHud && styles.hudValCompact, ultraCompact && styles.hudValUltra]}>{best}</Text>
             </View>
-            <View style={styles.hudPill}>
-              <Text style={styles.hudKey}>Tasks</Text>
-              <Text style={styles.hudVal}>{tasksDone}/{tasks.length}</Text>
+            <View style={[styles.hudPill, compactHud && styles.hudPillCompact, ultraCompact && styles.hudPillUltra]}>
+              <Text style={[styles.hudKey, compactHud && styles.hudKeyCompact, ultraCompact && styles.hudKeyUltra]}>Tasks</Text>
+              <Text style={[styles.hudVal, compactHud && styles.hudValCompact, ultraCompact && styles.hudValUltra]}>{tasksDone}/{tasks.length}</Text>
             </View>
-            <View style={[styles.hudPill, { flex: 1 }]}>
-              <Text style={styles.hudKey}>View</Text>
-              <Text style={styles.hudVal}>{cameraOpen ? view.name : "Office"}</Text>
+            <View style={[styles.hudPill, { flex: 1 }, compactHud && styles.hudPillCompact, ultraCompact && styles.hudPillUltra]}>
+              <Text style={[styles.hudKey, compactHud && styles.hudKeyCompact, ultraCompact && styles.hudKeyUltra]}>View</Text>
+              <Text style={[styles.hudVal, compactHud && styles.hudValCompact, ultraCompact && styles.hudValUltra]}>{cameraOpen ? view.name : "Office"}</Text>
             </View>
           </View>
 
-          <View style={styles.bars}>
-            <Bar label="Power" value={power} good="#66F3B3" bad="#FF6B6B" rightText={`${Math.round(power)}% • ${powerForecast}`} />
-            <Bar label="Heat" value={((heat - 16) / (34 - 16)) * 100} good="#DADADA" bad="#FFB86B" warn={heatCrit} rightText={`${heat.toFixed(1)}°C`} />
+          <View style={[styles.bars, compactHud && styles.barsCompact, ultraCompact && styles.barsUltra]}>
+            <Bar label="Power" value={power} good="#66F3B3" bad="#FF6B6B" rightText={`${Math.round(power)}% ? ${powerForecast}`} />
+            {!tightHud && (
+              <Bar
+                label="Heat"
+                value={((heat - 16) / (34 - 16)) * 100}
+                good="#DADADA"
+                bad="#FFB86B"
+                warn={heatCrit}
+                rightText={`${heat.toFixed(1)}?C`}
+              />
+            )}
             <Bar label="Air" value={air} good="#62D6FF" bad="#FFB86B" warn={airCrit} rightText={`${Math.round(air)}%`} />
-            <Bar label="Vent" value={ventHealth} good="#8CF7FF" bad="#FF6B6B" rightText={`${Math.round(ventHealth)}%`} />
+            {!compactHud && !tightHud && <Bar label="Vent" value={ventHealth} good="#8CF7FF" bad="#FF6B6B" rightText={`${Math.round(ventHealth)}%`} />}
             <Bar label="Sanity" value={sanity} good="#C1B7FF" bad="#FF6B6B" rightText={`${Math.round(sanity)}%`} />
-            <Bar label="Noise" value={noise} good="#9AD5FF" bad="#FFB86B" rightText={`${Math.round(noise)}%`} />
+            {!compactHud && !tightHud && <Bar label="Noise" value={noise} good="#9AD5FF" bad="#FFB86B" rightText={`${Math.round(noise)}%`} />}
           </View>
 
-          <View style={styles.statusRow}>
-            <View style={[styles.statusPill, doorL && styles.statusPillOn]}>
-              <Text style={styles.statusKey}>UȘĂ STG</Text>
-              <Text style={styles.statusVal}>{doorL ? "ON" : doorLLocked ? "LOCK" : "OFF"}</Text>
+          <View style={[styles.statusRow, compactHud && styles.statusRowWrap]}>
+            <View style={[styles.statusPill, compactHud && styles.statusPillCompact, ultraCompact && styles.statusPillUltra, doorL && styles.statusPillOn]}>
+              <Text style={[styles.statusKey, compactHud && styles.statusKeyCompact, ultraCompact && styles.statusKeyUltra]}>UȘĂ STG</Text>
+              <Text style={[styles.statusVal, compactHud && styles.statusValCompact, ultraCompact && styles.statusValUltra]}>{doorL ? "ON" : doorLLocked ? "LOCK" : "OFF"}</Text>
             </View>
-            <View style={[styles.statusPill, doorR && styles.statusPillOn]}>
-              <Text style={styles.statusKey}>UȘĂ DR</Text>
-              <Text style={styles.statusVal}>{doorR ? "ON" : doorRLocked ? "LOCK" : "OFF"}</Text>
+            <View style={[styles.statusPill, compactHud && styles.statusPillCompact, ultraCompact && styles.statusPillUltra, doorR && styles.statusPillOn]}>
+              <Text style={[styles.statusKey, compactHud && styles.statusKeyCompact, ultraCompact && styles.statusKeyUltra]}>UȘĂ DR</Text>
+              <Text style={[styles.statusVal, compactHud && styles.statusValCompact, ultraCompact && styles.statusValUltra]}>{doorR ? "ON" : doorRLocked ? "LOCK" : "OFF"}</Text>
             </View>
-            <View style={[styles.statusPill, sealL && styles.statusPillOn]}>
-              <Text style={styles.statusKey}>VENT STG</Text>
-              <Text style={styles.statusVal}>{sealL ? "SEALED" : "OPEN"}</Text>
+            {!tightHud && (
+              <View style={[styles.statusPill, compactHud && styles.statusPillCompact, ultraCompact && styles.statusPillUltra, sealL && styles.statusPillOn]}>
+                <Text style={[styles.statusKey, compactHud && styles.statusKeyCompact, ultraCompact && styles.statusKeyUltra]}>VENT STG</Text>
+                <Text style={[styles.statusVal, compactHud && styles.statusValCompact, ultraCompact && styles.statusValUltra]}>{sealL ? "SEALED" : "OPEN"}</Text>
+              </View>
+            )}
+            {!tightHud && (
+              <View style={[styles.statusPill, compactHud && styles.statusPillCompact, ultraCompact && styles.statusPillUltra, sealR && styles.statusPillOn]}>
+                <Text style={[styles.statusKey, compactHud && styles.statusKeyCompact, ultraCompact && styles.statusKeyUltra]}>VENT DR</Text>
+                <Text style={[styles.statusVal, compactHud && styles.statusValCompact, ultraCompact && styles.statusValUltra]}>{sealR ? "SEALED" : "OPEN"}</Text>
+              </View>
+            )}
+            <View style={[styles.statusPill, compactHud && styles.statusPillCompact, ultraCompact && styles.statusPillUltra]}>
+              <Text style={[styles.statusKey, compactHud && styles.statusKeyCompact, ultraCompact && styles.statusKeyUltra]}>ROUTE</Text>
+              <Text style={[styles.statusVal, compactHud && styles.statusValCompact, ultraCompact && styles.statusValUltra]}>{powerRoute}</Text>
             </View>
-            <View style={[styles.statusPill, sealR && styles.statusPillOn]}>
-              <Text style={styles.statusKey}>VENT DR</Text>
-              <Text style={styles.statusVal}>{sealR ? "SEALED" : "OPEN"}</Text>
-            </View>
-            <View style={styles.statusPill}>
-              <Text style={styles.statusKey}>ROUTE</Text>
-              <Text style={styles.statusVal}>{powerRoute}</Text>
-            </View>
-          {!!modifierLabel && (
-              <View style={styles.statusPill}>
-                <Text style={styles.statusKey}>MODS</Text>
-                <Text style={styles.statusVal}>{modifierLabel}</Text>
+          {!!modifierLabel && !tightHud && (
+              <View style={[styles.statusPill, compactHud && styles.statusPillCompact, ultraCompact && styles.statusPillUltra]}>
+                <Text style={[styles.statusKey, compactHud && styles.statusKeyCompact, ultraCompact && styles.statusKeyUltra]}>MODS</Text>
+                <Text style={[styles.statusVal, compactHud && styles.statusValCompact, ultraCompact && styles.statusValUltra]}>{modifierLabel}</Text>
               </View>
             )}
           </View>
@@ -5011,7 +7070,7 @@ if (screen === "SELECT") {
           </View>
         )}
 
-        {cameraOpen && (
+        {cameraOpen && !compactHud && (
           <View style={styles.miniMap}>
             <Text style={styles.miniMapTitle}>MAP</Text>
             <View style={styles.miniMapCanvas}>
@@ -5086,8 +7145,13 @@ if (screen === "SELECT") {
         )}
 
         {/* DOCK */}
-        <View style={styles.dock}>
-          <View style={styles.dockRow}>
+        <View style={[styles.dock, dockCompact && styles.dockCompact]}>
+          <ScrollView
+            style={[styles.dockScroll, { maxHeight: dockMax }]}
+            contentContainerStyle={[styles.dockScrollContent, dockCompact && { gap: 6 }]}
+            showsVerticalScrollIndicator={false}
+          >
+          <View style={[styles.dockRow, dockCompact && styles.dockRowCompact]}>
             <SoftButton
               title={`UȘĂ STG ${doorL ? "ON" : "OFF"}`}
               tone={doorL ? "good" : "danger"}
@@ -5136,11 +7200,11 @@ if (screen === "SELECT") {
             />
           </View>
 
-          <View style={styles.dockRow}>
+          <View style={[styles.dockRow, dockCompact && styles.dockRowCompact]}>
             <SoftButton title="LURE" sub={isCd(lureCdUntil) ? `${cdLeft(lureCdUntil).toFixed(1)}s` : "atrage spre view"} disabled={isCd(lureCdUntil) || noCamsMode || systemDisabled || spikeBlocksCams} onPress={() => doLure(cameraOpen ? view.id : "OFFICE")}  powerGate />
             <SoftButton title="MUSIC" sub={isCd(musicCdUntil) ? `${cdLeft(musicCdUntil).toFixed(1)}s` : "calmează unii"} disabled={isCd(musicCdUntil) || systemDisabled} onPress={doMusic}  powerGate />
             <SoftButton title="RESET" sub={isCd(resetCdUntil) ? `${cdLeft(resetCdUntil).toFixed(1)}s` : jam ? "curăță JAM" : "pulse"} disabled={isCd(resetCdUntil) || systemDisabled} onPress={doReset}  powerGate />
-            <SoftButton title="LIGHT" sub={isCd(lightCdUntil) ? `${cdLeft(lightCdUntil).toFixed(1)}s` : "reveal phantom"} disabled={isCd(lightCdUntil) || noCamsMode || systemDisabled || spikeBlocksCams} onPress={doFlash}  powerGate />
+            <SoftButton title="LIGHT" sub={isCd(lightCdUntil) ? `${cdLeft(lightCdUntil).toFixed(1)}s` : "reveal phantom"} disabled={isCd(lightCdUntil) || noCamsMode || noFlash || systemDisabled || spikeBlocksCams} onPress={doFlash}  powerGate />
             <SoftButton
               title={genOn ? `GEN ON ${Math.ceil((genOnUntil - now()) / 1000)}s` : "GEN"}
               sub={isCd(genCdUntil) ? `${cdLeft(genCdUntil).toFixed(1)}s` : "mini-game"}
@@ -5149,19 +7213,19 @@ if (screen === "SELECT") {
              powerGate />
           </View>
 
-          <View style={styles.dockRow}>
+          <View style={[styles.dockRow, dockCompact && styles.dockRowCompact]}>
             <SoftButton title={`G1 ${gadgetLabel(gadgets[0])}`} onPress={() => useGadget(0)} disabled={!gadgets[0] || systemDisabled} powerGate />
             <SoftButton title={`G2 ${gadgetLabel(gadgets[1])}`} onPress={() => useGadget(1)} disabled={!gadgets[1] || systemDisabled} powerGate />
             <SoftButton title="TASKS" onPress={() => setTaskOpen(true)} disabled={systemDisabled} powerGate />
             <SoftButton title={scanActive ? "SCAN" : "SCAN"} sub={scanCd ? `${cdLeft(scanCdUntil).toFixed(1)}s` : "see thru"} onPress={doScan} disabled={scanCd || systemDisabled} powerGate />
-            <SoftButton title="OVERCLOCK" sub={overclockCd ? `${cdLeft(overclockCdUntil).toFixed(1)}s` : "+2s scan"} onPress={doOverclock} disabled={overclockCd || systemDisabled} powerGate />
+            <SoftButton title="OVERCLOCK" sub={overclockCd ? `${cdLeft(overclockCdUntil).toFixed(1)}s` : "+2s scan"} onPress={doOverclock} disabled={overclockCd || noOverclock || systemDisabled} powerGate />
             <SoftButton title="ARTIFACT" sub={bossArtifactUsedRef.current ? "used" : "boss stop"} onPress={useArtifact} disabled={!bossPresent || bossArtifactUsedRef.current || systemDisabled} powerGate />
             <SoftButton title="ALARM" sub={alarmCd ? `${cdLeft(alarmCdUntil).toFixed(1)}s` : "scare"} onPress={doAlarm} disabled={alarmCd || systemDisabled} powerGate />
             <SoftButton title="PING" sub={motionPing ? `${cdLeft(motionPingUntil).toFixed(1)}s` : "motion"} onPress={doPing} disabled={motionPing || systemDisabled} powerGate />
             <SoftButton title="HELP" onPress={() => setHelpOpen(true)} powerGate />
           </View>
 
-          <View style={styles.dockRow}>
+          <View style={[styles.dockRow, dockCompact && styles.dockRowCompact]}>
             <SoftButton title="FAN -" onPress={() => setFan((f) => clamp(f - 0.08, 0, 1))} disabled={systemDisabled} powerGate />
             <View style={styles.fanPill}>
               <Text style={styles.fanTxt}>FAN {Math.round(fan * 100)}%</Text>
@@ -5169,7 +7233,7 @@ if (screen === "SELECT") {
             <SoftButton title="FAN +" onPress={() => setFan((f) => clamp(f + 0.08, 0, 1))} disabled={systemDisabled} powerGate />
             <SoftButton title="MENU" onPress={goMenu} disabled={hardcore} />
           </View>
-          <View style={styles.dockRow}>
+          <View style={[styles.dockRow, dockCompact && styles.dockRowCompact]}>
             <SoftButton title="ROUTE: BAL" onPress={() => setPowerRoute("BALANCED")} disabled={systemDisabled} powerGate />
             <SoftButton title="ROUTE: DOORS" onPress={() => setPowerRoute("DOORS")} disabled={systemDisabled} powerGate />
             <SoftButton title="ROUTE: CAMS" onPress={() => setPowerRoute("CAMS")} disabled={systemDisabled} powerGate />
@@ -5199,6 +7263,7 @@ if (screen === "SELECT") {
               />
             </View>
           )}
+          </ScrollView>
         </View>
 
         {/* FUSE BREAKER */}
@@ -5494,6 +7559,16 @@ const styles = StyleSheet.create({
   menuBrandSub: { color: "rgba(220,220,230,0.6)", fontSize: 12 },
   menuStatusRow: { flexDirection: "row", gap: 8, alignItems: "center" },
   menuPill: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, borderWidth: 1, borderColor: "rgba(120,255,220,0.18)", backgroundColor: "#101826" },
+  adminActionsRow: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 8 },
+  adminFeedCard: {
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+    backgroundColor: "rgba(12,18,28,0.65)",
+    gap: 8,
+  },
   menuPillText: { color: "rgba(220,220,230,0.8)", fontSize: 12 },
   menuPillStrong: { color: "#F2F2F2", fontWeight: "900" },
   menuDot: { width: 8, height: 8, borderRadius: 8, backgroundColor: "#34d399" },
@@ -5618,6 +7693,29 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   loginHint: { color: "rgba(220,220,230,0.55)", fontSize: 12, marginTop: 10, marginBottom: 8 },
+  fontChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "rgba(255,255,255,0.05)",
+    marginRight: 8,
+  },
+  fontChipOn: { borderColor: "#4f9cff", backgroundColor: "rgba(79,156,255,0.12)" },
+  fontChipTxt: { color: "#EAF2FF", fontWeight: "800" },
+  bannerTile: {
+    width: 120,
+    marginRight: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    overflow: "hidden",
+    backgroundColor: "rgba(0,0,0,0.2)",
+  },
+  bannerTileOn: { borderColor: "#4f9cff", shadowColor: "#4f9cff", shadowOpacity: 0.6, shadowRadius: 10 },
+  bannerImg: { width: "100%", height: 70 },
+  bannerLabel: { color: "#EAF2FF", textAlign: "center", paddingVertical: 4, fontSize: 12, fontWeight: "800" },
   loginActionRow: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 6 },
   loginActionBtn: { flex: 1 },
   loginOr: { color: "rgba(220,220,230,0.55)", fontSize: 12, fontWeight: "800", letterSpacing: 1 },
@@ -5641,6 +7739,42 @@ const styles = StyleSheet.create({
   seedName: { color: "#F2F2F2", fontWeight: "900" },
   seedMetaRow: { flexDirection: "row", gap: 12, flexWrap: "wrap" },
   seedMeta: { color: "rgba(220,220,230,0.7)", fontSize: 12 },
+  spinResult: { color: "#EAF2FF", fontWeight: "900", marginLeft: 10 },
+  spinPity: { color: "rgba(230,230,240,0.8)", fontWeight: "800", marginLeft: 10, marginTop: 6 },
+  spinBetText: { color: "#EAF2FF", fontWeight: "900" },
+  spinWrap: { paddingHorizontal: 18, paddingTop: 40, gap: 16, flex: 1 },
+  spinTitle: { color: "#F2F2F2", fontSize: 26, fontWeight: "900" },
+  spinSub: { color: "rgba(220,220,230,0.7)" },
+  spinWindow: {
+    marginTop: 12,
+    height: 120,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "rgba(0,0,0,0.35)",
+    overflow: "hidden",
+    justifyContent: "center",
+  },
+  spinItem: {
+    padding: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    backgroundColor: "rgba(15,20,30,0.85)",
+    marginHorizontal: 6,
+    alignItems: "center",
+  },
+  spinItemName: { color: "#EAF2FF", fontWeight: "900", textAlign: "center" },
+  spinItemRarity: { color: "rgba(220,220,230,0.7)", fontSize: 12, marginTop: 4 },
+  spinIndicator: {
+    position: "absolute",
+    left: "50%",
+    width: 6,
+    height: "100%",
+    marginLeft: -3,
+    backgroundColor: "#4f9cff",
+    opacity: 0.75,
+  },
+  spinActions: { flexDirection: "row", gap: 10, alignItems: "center" },
 
   profileAvatar: { width: 72, height: 72, borderRadius: 18, alignSelf: "flex-start" },
   profileAvatarPlaceholder: { width: 72, height: 72, borderRadius: 18, backgroundColor: "#141A2A" },
@@ -5726,7 +7860,34 @@ const styles = StyleSheet.create({
   },
   scoreTitle: { fontSize: 26, fontWeight: "900", color: "#F2F2F2" },
   scoreSub: { color: "rgba(220,220,230,0.7)", marginTop: 2 },
+  scoreTabs: { flexDirection: "row", gap: 8, marginTop: 10, marginBottom: 6, flexWrap: "wrap" },
+  scoreTabBtn: { paddingVertical: 6, paddingHorizontal: 12, borderRadius: 999, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
+  scoreTabBtnActive: { backgroundColor: "rgba(79,156,255,0.18)", borderColor: "rgba(79,156,255,0.65)" },
+  scoreTabText: { color: "rgba(220,220,230,0.7)", fontWeight: "800" },
+  scoreTabTextActive: { color: "#9ad5ff" },
   scoreEmpty: { color: "rgba(220,220,230,0.6)", marginTop: 8 },
+  podium: { flexDirection: "row", alignItems: "flex-end", justifyContent: "space-around", paddingVertical: 12, gap: 10 },
+  podiumCol: {
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 14,
+    backgroundColor: "rgba(15,15,20,0.7)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    minWidth: 90,
+    shadowColor: "#000",
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  pod1: { transform: [{ translateY: -12 }], backgroundColor: "rgba(255,215,0,0.12)", borderColor: "rgba(255,215,0,0.35)" },
+  pod2: { transform: [{ translateY: 0 }], backgroundColor: "rgba(192,192,192,0.12)", borderColor: "rgba(192,192,192,0.30)" },
+  pod3: { transform: [{ translateY: 8 }], backgroundColor: "rgba(205,127,50,0.12)", borderColor: "rgba(205,127,50,0.30)" },
+  podPlace: { color: "rgba(255,255,255,0.9)", fontWeight: "900", fontSize: 16 },
+  podName: { color: "#EAF2FF", fontWeight: "900", marginTop: 4 },
+  podScore: { color: "#9ad5ff", fontWeight: "900", fontSize: 18 },
+  podMeta: { color: "rgba(220,220,230,0.75)", fontSize: 12 },
   scoreRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -5829,8 +7990,26 @@ const styles = StyleSheet.create({
   itemCost: { color: "rgba(255,200,120,0.8)", fontSize: 12, marginTop: 6, fontWeight: "800" },
   rarityPill: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4, borderWidth: 1 },
   rarityTxt: { fontSize: 10, fontWeight: "900", letterSpacing: 1 },
-  loadoutRow: { flexDirection: "row", gap: 12 },
+  loadoutRow: { flexDirection: "row", gap: 12, marginBottom: 12 },
   loadoutCard: { flex: 1, padding: 12, borderRadius: 16, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", backgroundColor: "rgba(255,255,255,0.05)" },
+  slotCard: {
+    flex: 1,
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.18)",
+    backgroundColor: "rgba(15,18,28,0.8)",
+    shadowColor: "#000",
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  slotLabel: { color: "rgba(220,220,230,0.7)", fontWeight: "800", letterSpacing: 0.3 },
+  slotName: { color: "#EAF2FF", fontWeight: "900", fontSize: 15, marginTop: 6 },
+  slotHint: { marginTop: 6, color: "rgba(220,220,230,0.6)", fontSize: 11, fontStyle: "italic" },
+  slotClear: { marginTop: 10, alignSelf: "flex-start", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.18)" },
+  slotClearTxt: { color: "rgba(255,220,220,0.85)", fontWeight: "800", fontSize: 11 },
+  pickHint: { color: "rgba(220,220,230,0.7)", marginTop: 8, fontStyle: "italic", textAlign: "center" },
 
   intelRow: {
     flexDirection: "row",
@@ -5847,9 +8026,46 @@ const styles = StyleSheet.create({
 
   // SELECT
   selectHeaderAlt: { paddingHorizontal: 18, paddingTop: 16 },
+  selectShell: { flex: 1, paddingHorizontal: 16, paddingBottom: 12 },
+  selectTopbar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    paddingTop: 12,
+    paddingBottom: 12,
+  },
+  selectTopActions: { flexDirection: "row", alignItems: "center", gap: 10, flexWrap: "wrap" },
+  selectTopbarStack: { flexDirection: "column", alignItems: "flex-start" },
+  selectTopActionsStack: { width: "100%", justifyContent: "flex-start" },
+  selectStatPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.18)",
+    backgroundColor: "rgba(10,15,20,0.55)",
+    minWidth: 110,
+  },
+  selectStatLabel: { color: "rgba(220,220,230,0.6)", fontSize: 11, fontWeight: "800" },
+  selectStatValue: { color: "#F2F2F2", fontSize: 14, fontWeight: "900", marginTop: 2 },
+  selectLayoutNew: { flex: 1, flexDirection: "row", gap: 12, paddingBottom: 14 },
+  selectPanel: {
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+    backgroundColor: "rgba(10,15,20,0.55)",
+    overflow: "hidden",
+  },
+  selectGridPanel: { flex: 1 },
+  selectSidePanel: { width: 360, padding: 14 },
+  panelHeader: { padding: 12, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)" },
+  panelTitle: { color: "#F2F2F2", fontSize: 16, fontWeight: "900" },
+  panelMeta: { color: "rgba(220,220,230,0.6)", fontSize: 12, marginTop: 4 },
   selectTitleAlt: { fontSize: 28, fontWeight: "900", color: "#F2F2F2", letterSpacing: 1 },
   selectSubAlt: { marginTop: 4, color: "rgba(220,220,230,0.7)" },
   selectLayout: { flex: 1, flexDirection: "row", gap: 12, padding: 14 },
+  selectLayoutStack: { flexDirection: "column" },
   selectGridCard: {
     flex: 1,
     borderRadius: 18,
@@ -5865,6 +8081,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(120,255,220,0.16)",
   },
+  selectSideStack: { width: "100%" },
   sideTitle: { color: "rgba(230,230,240,0.8)", fontWeight: "900", marginBottom: 6 },
   sideMeta: { color: "rgba(220,220,230,0.7)", marginTop: 4 },
   infoCard: {
@@ -5892,11 +8109,7 @@ const styles = StyleSheet.create({
   },
   customBtnTxt: { color: "#F2F2F2", fontWeight: "900" },
 
-  charTile: {
-    width: "16.6%",
-    aspectRatio: 1,
-    padding: 6,
-  },
+  charTile: { aspectRatio: 1, padding: 4 },
   charTileOn: { transform: [{ scale: 0.96 }] },
   charTileImg: { width: "100%", height: "100%", borderRadius: 8, borderWidth: 1, borderColor: "rgba(255,255,255,0.12)" },
   charTileGlow: {
@@ -5946,10 +8159,25 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   charTileTxt: { color: "#F2F2F2", fontSize: 10, fontWeight: "900" },
+  charTileFooterCompact: {
+    position: "absolute",
+    left: 4,
+    right: 4,
+    bottom: 4,
+    height: 16,
+    borderRadius: 6,
+    backgroundColor: "rgba(0,0,0,0.7)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  charTileTxtCompact: { color: "#F2F2F2", fontSize: 9, fontWeight: "900" },
 
   // PLAY
   hud: { paddingHorizontal: 12, paddingTop: 10 },
+  hudCompact: { paddingHorizontal: 8, paddingTop: 6 },
+  hudUltra: { paddingHorizontal: 6, paddingTop: 4 },
   hudTop: { flexDirection: "row", gap: 10, alignItems: "center" },
+  hudTopWrap: { flexWrap: "wrap" },
   hudPill: {
     borderRadius: 18,
     paddingVertical: 8,
@@ -5958,8 +8186,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.10)",
   },
+  hudPillCompact: { flexBasis: "48%", paddingVertical: 6 },
+  hudPillUltra: { flexBasis: "100%", paddingVertical: 5 },
   hudKey: { color: "rgba(220,220,230,0.70)", fontSize: 12, fontWeight: "800" },
+  hudKeyCompact: { fontSize: 11 },
+  hudKeyUltra: { fontSize: 10 },
   hudVal: { color: "#F2F2F2", fontSize: 16, fontWeight: "900", marginTop: 2 },
+  hudValCompact: { fontSize: 14, marginTop: 1 },
+  hudValUltra: { fontSize: 13, marginTop: 1 },
 
   bars: {
     marginTop: 10,
@@ -5969,13 +8203,26 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.10)",
   },
+  barsCompact: { padding: 10, borderRadius: 16 },
+  barsUltra: { padding: 8, borderRadius: 14 },
   barRow: { flexDirection: "row", alignItems: "center", marginVertical: 6 },
+  barRowCompact: { marginVertical: 4 },
+  barRowUltra: { marginVertical: 3 },
   barLabel: { width: 62, color: "rgba(235,235,245,0.80)", fontWeight: "800" },
+  barLabelCompact: { width: 52, fontSize: 10 },
+  barLabelUltra: { width: 46, fontSize: 9 },
   barTrack: { flex: 1, height: 12, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.10)", overflow: "hidden" },
   barFill: { height: 12, borderRadius: 10 },
+  barTrackCompact: { height: 10 },
+  barTrackUltra: { height: 8 },
+  barFillCompact: { height: 10 },
+  barFillUltra: { height: 8 },
   barVal: { width: 70, textAlign: "right", color: "rgba(235,235,245,0.80)", fontWeight: "900" },
+  barValCompact: { width: 58, fontSize: 11 },
+  barValUltra: { width: 52, fontSize: 10 },
 
   statusRow: { marginTop: 8, flexDirection: "row", gap: 8, flexWrap: "wrap" },
+  statusRowWrap: { flexWrap: "wrap" },
   statusPill: {
     flexGrow: 1,
     flexBasis: 120,
@@ -5987,8 +8234,14 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.10)",
   },
   statusPillOn: { borderColor: "rgba(120,255,190,0.35)", backgroundColor: "rgba(90,255,180,0.10)" },
+  statusPillCompact: { flexBasis: 104, paddingVertical: 6 },
+  statusPillUltra: { flexBasis: "100%", paddingVertical: 5 },
   statusKey: { color: "rgba(220,220,230,0.7)", fontSize: 11, fontWeight: "800" },
+  statusKeyCompact: { fontSize: 10 },
+  statusKeyUltra: { fontSize: 9 },
   statusVal: { color: "#F2F2F2", fontWeight: "900", marginTop: 2 },
+  statusValCompact: { fontSize: 12, marginTop: 1 },
+  statusValUltra: { fontSize: 11, marginTop: 1 },
   damagePill: {
     marginTop: 8,
     borderRadius: 14,
@@ -6200,7 +8453,11 @@ const styles = StyleSheet.create({
   },
 
   dock: { position: "absolute", left: 10, right: 10, bottom: 10, gap: 10 },
+  dockCompact: { left: 6, right: 6, bottom: 6 },
+  dockScroll: { maxHeight: 260 },
+  dockScrollContent: { gap: 10 },
   dockRow: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  dockRowCompact: { gap: 6 },
 
   softBtn: {
     flexGrow: 1,
@@ -6210,9 +8467,24 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     borderWidth: 1,
   },
+  softBtnCompact: {
+    flexBasis: 0,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderRadius: 16,
+  },
+  softBtnUltra: {
+    paddingVertical: 8,
+    paddingHorizontal: 6,
+    borderRadius: 14,
+  },
   softBtnPressed: { transform: [{ scale: 0.98 }] },
   softBtnTitle: { color: "#F3F3F3", fontWeight: "900", fontSize: 14 },
+  softBtnTitleCompact: { fontSize: 12 },
+  softBtnTitleUltra: { fontSize: 11 },
   softBtnSub: { marginTop: 4, color: "rgba(230,230,240,0.65)", fontWeight: "700", fontSize: 11 },
+  softBtnSubCompact: { fontSize: 9, marginTop: 2 },
+  softBtnSubUltra: { fontSize: 8, marginTop: 1 },
 
   fanPill: {
     flex: 1,
@@ -6325,4 +8597,9 @@ const styles = StyleSheet.create({
   recapLine: { color: "rgba(230,230,240,0.8)", fontSize: 12, marginTop: 2 },
   jumpSmall: { marginTop: 6, color: "rgba(235,235,245,0.72)" },
 });
+
+
+
+
+
 
